@@ -1,0 +1,116 @@
+/*
+ * Vencord, a modification for Discord's desktop app
+ * Copyright (c) 2026 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+.vc-hermesStatus-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 26px;
+    margin: 0 16px 6px;
+    padding: 4px 8px;
+    overflow: hidden;
+    color: var(--text-default);
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-accent);
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 16px;
+    pointer-events: auto;
+}
+
+.vc-hermesStatus-field,
+.vc-hermesStatus-state {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vc-hermesStatus-field {
+    color: var(--text-muted);
+}
+
+.vc-hermesStatus-fieldGroup {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    gap: 8px;
+}
+
+.vc-hermesStatus-fieldGroup-connection {
+    margin-left: auto;
+}
+
+.vc-hermesStatus-separator {
+    flex: 0 0 auto;
+    color: var(--text-muted);
+    opacity: 0.65;
+}
+
+.vc-hermesStatus-model {
+    max-width: 160px;
+    color: var(--text-default);
+    font-weight: 600;
+}
+
+.vc-hermesStatus-line {
+    flex: 1 1 auto;
+    color: var(--text-default);
+    font-variant-numeric: tabular-nums;
+}
+
+.vc-hermesStatus-tool {
+    max-width: 140px;
+}
+
+.vc-hermesStatus-yolo {
+    color: var(--status-warning);
+    font-weight: 600;
+}
+
+.vc-hermesStatus-state {
+    padding-left: 4px;
+    font-weight: 600;
+}
+
+.vc-hermesStatus-state-connected .vc-hermesStatus-state {
+    color: var(--status-positive);
+}
+
+.vc-hermesStatus-state-connecting .vc-hermesStatus-state,
+.vc-hermesStatus-state-stale .vc-hermesStatus-state {
+    color: var(--status-warning);
+}
+
+.vc-hermesStatus-state-disconnected .vc-hermesStatus-state,
+.vc-hermesStatus-state-error .vc-hermesStatus-state {
+    color: var(--status-danger);
+}
+
+.vc-hermesStatus-tokenError {
+    margin-top: 8px;
+    color: var(--text-danger);
+    font-size: 12px;
+    line-height: 16px;
+}
+
+@media (max-width: 900px) {
+    .vc-hermesStatus-hide-compact {
+        display: none;
+    }
+}
+
+@media (max-width: 700px) {
+    .vc-hermesStatus-hide-narrow,
+    .vc-hermesStatus-tool {
+        display: none;
+    }
+
+    .vc-hermesStatus-bar {
+        margin-right: 8px;
+        margin-left: 8px;
+    }
+}

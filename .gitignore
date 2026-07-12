@@ -1,0 +1,29 @@
+# Secrets and local Hermes configuration
+.env
+.env.*
+*.token
+*.key
+*.pem
+*.secret
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Node/Vencord build products
+node_modules/
+dist/
+*.map
+
+# Windows and editors
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+
+# Local logs and generated media
+*.log
+screenshots/private/
