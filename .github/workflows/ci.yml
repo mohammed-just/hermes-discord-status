@@ -81,6 +81,7 @@ jobs:
 
       - name: Copy userplugin
         run: |
+          mkdir -p Vencord/src/userplugins
           rm -rf Vencord/src/userplugins/hermesStatus
           cp -a hermes-discord-status/vencord-userplugin/hermesStatus Vencord/src/userplugins/hermesStatus
 

@@ -107,6 +107,9 @@ def validate_commands(workflow, failures):
         failures.append("workflow must install pinned PyYAML with pytest")
     if STATUS_TEST_COMMAND not in run_values:
         failures.append("workflow must run the standalone tsx status test command")
+    copy_commands = [value for value in run_values if "cp -a hermes-discord-status/vencord-userplugin/hermesStatus" in value]
+    if len(copy_commands) != 1 or "mkdir -p Vencord/src/userplugins" not in copy_commands[0] or copy_commands[0].index("mkdir -p Vencord/src/userplugins") > copy_commands[0].index("cp -a hermes-discord-status/vencord-userplugin/hermesStatus"):
+        failures.append("workflow must create Vencord/src/userplugins before copying the userplugin")
     if "pnpm exec vitest run src/userplugins/hermesStatus/tests/statusLogic.test.ts" in run_values:
         failures.append("workflow must not run the status test through vitest")
 
@@ -194,6 +197,14 @@ def run_mutation_tests(workflow):
             step["run"] = "pnpm exec vitest run src/userplugins/hermesStatus/tests/statusLogic.test.ts"
             break
     expect_policy_failure(mutated, "standalone tsx")
+
+    mutated = deepcopy(workflow)
+    for _, _, step in iter_steps(mutated):
+        run = step.get("run", "")
+        if "cp -a hermes-discord-status/vencord-userplugin/hermesStatus" in run:
+            step["run"] = run.replace("mkdir -p Vencord/src/userplugins\n", "")
+            break
+    expect_policy_failure(mutated, "create Vencord/src/userplugins")
 
 
 def main():
