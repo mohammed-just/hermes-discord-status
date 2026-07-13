@@ -1,5 +1,5 @@
 name: discord-status
-version: 0.1.0
+version: 0.2.0
 description: Loopback-only live Hermes session status for Discord channel routes.
 author: local
 kind: standalone
