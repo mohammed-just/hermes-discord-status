@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .registry import SessionRegistry
+from .registry import MAX_SAFE_WIRE_INTEGER, SessionRegistry
 
 
 PUBLIC_API_ERROR = "API request failed"
@@ -29,6 +29,15 @@ def _usage_prompt_tokens(usage: Any) -> int | None:
     if isinstance(details, dict):
         return _positive_int(details.get("total_tokens"))
     return None
+
+
+def _usage_total_tokens(usage: Any) -> int | None:
+    if not isinstance(usage, dict):
+        return None
+    value = usage.get("total_tokens")
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0 or value > MAX_SAFE_WIRE_INTEGER:
+        return None
+    return value
 
 
 def resolve_context_max(model: str, provider: str | None = None, base_url: str | None = None) -> int | None:
@@ -152,18 +161,22 @@ class StatusHooks:
         self.registry.update_context(session_id, approx)
 
     def post_api_request(self, **kw) -> None:
+        session_id = kw.get("session_id") or ""
         used = _usage_prompt_tokens(kw.get("usage"))
         self.registry.update_context(
-            kw.get("session_id") or "",
+            session_id,
             used,
             context_max=resolve_context_max(kw.get("model") or "", kw.get("provider"), kw.get("base_url")),
         )
+        total_tokens = _usage_total_tokens(kw.get("usage"))
+        if total_tokens is not None:
+            self.registry.add_total_processed_tokens(session_id, total_tokens)
         # Public post_api_request hooks do not always include compression_count.
         # Keep the registry's explicit zero/last-known value unless Hermes
         # supplies a concrete count; never infer it from usage or lifecycle events.
         count = _positive_int(kw.get("compression_count"))
         if count is not None:
-            self.registry.update_compression_count(kw.get("session_id") or "", count)
+            self.registry.update_compression_count(session_id, count)
 
     def api_request_error(self, **kw) -> None:
         # Provider errors may contain prompts, request details, or credentials.

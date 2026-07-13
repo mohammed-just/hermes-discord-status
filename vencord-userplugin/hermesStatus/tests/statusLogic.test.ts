@@ -21,6 +21,7 @@ const status: HermesStatus = {
     context_used: 1000,
     context_max: 2000,
     context_percent: 50,
+    total_processed_tokens: 748126,
     session_started_at: 0,
     turn_started_at: 120,
     busy: true,
@@ -48,6 +49,35 @@ const legacyPayload = {
 const parsed = validateHermesStatus(legacyPayload);
 assertEqual(parsed?.active_subagents, 4);
 
+const parsedWithTotal = validateHermesStatus({
+    ...status,
+    session_started_at: 1_700_000_000,
+    turn_started_at: null,
+    updated_at: 1_700_000_001,
+    total_processed_tokens: 748126
+});
+assertEqual(parsedWithTotal?.total_processed_tokens, 748126);
+
+const payloadWithoutTotal: Partial<HermesStatus> = {
+    ...status,
+    session_started_at: 1_700_000_000,
+    turn_started_at: null,
+    updated_at: 1_700_000_001
+};
+delete payloadWithoutTotal.total_processed_tokens;
+const parsedWithoutTotal = validateHermesStatus(payloadWithoutTotal);
+assertEqual(parsedWithoutTotal?.total_processed_tokens, 0);
+
+for (const invalidTotal of [-1, 1.5, "748126", null, Number.MAX_SAFE_INTEGER + 1]) {
+    assertEqual(validateHermesStatus({
+        ...status,
+        session_started_at: 1_700_000_000,
+        turn_started_at: null,
+        updated_at: 1_700_000_001,
+        total_processed_tokens: invalidTotal
+    }), null);
+}
+
 const idleFields = buildStatusFields({
     channelId: "c1",
     status: {
@@ -71,7 +101,7 @@ assertEqual(idleFields.some(field => field.id === "yolo"), false);
 assertEqual(idleFields.some(field => field.id === "active-tool"), false);
 assertEqual(idleFields.some(field => field.id === "active-tool-count"), false);
 assertEqual(idleFields.some(field => field.id === "tool-count"), false);
-assertEqual(idleFields.map(field => field.id).join(","), "model,context,gauge,session-elapsed,freshness,connection");
+assertEqual(idleFields.map(field => field.id).join(","), "model,context,total-processed,gauge,session-elapsed,freshness,connection");
 
 const activeFields = buildStatusFields({
     channelId: "c1",
@@ -105,6 +135,10 @@ assertEqual(statusFieldClassName(activeFields.find(field => field.id === "active
 assertEqual(activeFields.some(field => field.id === "active-tool" && field.tooltip === "Active tool: shell"), true);
 assertEqual(activeFields.some(field => field.id === "active-tool-count" && field.tooltip === "Active tool calls: 2"), true);
 assertEqual(activeFields.some(field => field.id === "context" && field.tooltip === "Context window: 1K used of 2K (50%)"), true);
+assertEqual(activeFields.find(field => field.id === "total-processed")?.value, "Total 748K");
+assertEqual(activeFields.find(field => field.id === "total-processed")?.tooltip, "Total processed: 748,126 tokens");
+assertEqual(activeFields.find(field => field.id === "total-processed")?.ariaLabel, "Total processed: 748,126 tokens");
+assertEqual(activeFields.map(field => field.id).slice(0, 4).join(","), "model,context,total-processed,gauge");
 assertEqual(activeFields.some(field => field.id === "gauge" && field.tooltip === "Context gauge: 50% used"), true);
 assertEqual(activeFields.some(field => field.id === "session-elapsed" && field.tooltip === "Session elapsed: 3m"), true);
 assertEqual(activeFields.some(field => field.id === "freshness" && field.tooltip === "State last changed: 2m ago"), true);

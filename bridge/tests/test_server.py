@@ -111,6 +111,7 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(body["model"], "Hermes")
         self.assertFalse(body["busy"])
         self.assertIsNone(body["context_used"])
+        self.assertEqual(body["total_processed_tokens"], 0)
         self.assertEqual(body["compression_count"], 0)
         self.assertEqual(body["active_subagents"], 0)
         self.assertNotIn("active_background_subagents", body)

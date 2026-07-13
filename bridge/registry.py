@@ -9,6 +9,9 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 
+MAX_SAFE_WIRE_INTEGER = 2**53 - 1
+
+
 def unix_now(ts: float | None = None) -> float:
     return float(time.time() if ts is None else ts)
 
@@ -27,6 +30,7 @@ class SessionState:
     context_used: int | None
     context_max: int | None
     context_percent: float | None
+    total_processed_tokens: int
     session_started_at: float
     turn_started_at: float | None
     busy: bool
@@ -83,6 +87,7 @@ class SessionRegistry:
             context_used=existing.context_used if existing else None,
             context_max=next_context_max,
             context_percent=_percent(existing.context_used, next_context_max) if existing else None,
+            total_processed_tokens=existing.total_processed_tokens if existing else 0,
             session_started_at=existing.session_started_at if existing else unix_now(now),
             turn_started_at=existing.turn_started_at if existing else None,
             busy=existing.busy if existing else False,
@@ -135,6 +140,18 @@ class SessionRegistry:
             if context_max is not None:
                 state.context_max = int(context_max)
             state.context_percent = _percent(state.context_used, state.context_max)
+            state.updated_at = unix_now(self._clock())
+
+    def add_total_processed_tokens(self, session_id: str, delta: int) -> None:
+        if not session_id or not isinstance(delta, int) or isinstance(delta, bool) or delta < 0 or delta > MAX_SAFE_WIRE_INTEGER:
+            return
+        with self._lock:
+            state = self._states.get(session_id)
+            if state is None:
+                state = self._upsert_session_locked(session_id, "", now=self._clock())
+            if state.total_processed_tokens > MAX_SAFE_WIRE_INTEGER - delta:
+                return
+            state.total_processed_tokens += delta
             state.updated_at = unix_now(self._clock())
 
     def _tool_key(self, tool_call_id: str | None) -> str:

@@ -44,6 +44,10 @@ export function formatContext(used: number | null, max: number | null): string {
     return `${formatCompactNumber(used)}/${formatCompactNumber(max)}`;
 }
 
+export function formatExactCount(value: number): string {
+    return Math.max(0, Math.round(value)).toLocaleString("en-US");
+}
+
 export function clampPercent(value: number | null, used: number | null, max: number | null): number | null {
     const percent = value ?? (used != null && max != null && max > 0 ? used / max * 100 : null);
     if (percent == null || !Number.isFinite(percent)) return null;
@@ -157,6 +161,7 @@ export function buildStatusFields(snapshot: HermesSnapshot, now = Date.now()): S
 
     fields.push(field("model", status.model || "Hermes", `Model: ${status.model || "unknown"}`, "model"));
     fields.push(field("context", context, `Context window: ${formatCompactNumber(status.context_used)} used of ${formatCompactNumber(status.context_max)} (${percentText})`, "context"));
+    fields.push(field("total-processed", `Total ${formatCompactNumber(status.total_processed_tokens)}`, `Total processed: ${formatExactCount(status.total_processed_tokens)} tokens`, "hide-narrow"));
     fields.push(field("gauge", `${formatContextGauge(percent)} ${percentText}`, `Context gauge: ${percentText} used`, "gauge"));
 
     if (compressionCount != null && compressionCount > 0) {

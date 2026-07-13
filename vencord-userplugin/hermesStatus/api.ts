@@ -34,6 +34,10 @@ function isNullableString(value: unknown): value is string | null {
     return value === null || typeof value === "string";
 }
 
+function isNonNegativeSafeInteger(value: unknown): value is number {
+    return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
 export function validateHermesStatus(value: unknown): HermesStatus | null {
     if (!isObject(value) || value.schema_version !== 1) return null;
     if (typeof value.session_id !== "string" || !value.session_id.trim()) return null;
@@ -42,6 +46,8 @@ export function validateHermesStatus(value: unknown): HermesStatus | null {
     if (value.context_used != null && value.context_used < 0) return null;
     if (value.context_max != null && value.context_max <= 0) return null;
     if (value.context_percent != null && value.context_percent < 0) return null;
+    const totalProcessedTokens = "total_processed_tokens" in value ? value.total_processed_tokens : 0;
+    if (!isNonNegativeSafeInteger(totalProcessedTokens)) return null;
     if (!isSafeEpoch(typeof value.session_started_at === "number" ? value.session_started_at : null)) return null;
     if (!isSafeEpoch(isNullableNumber(value.turn_started_at) ? value.turn_started_at : null)) return null;
     if (typeof value.busy !== "boolean") return null;
@@ -63,6 +69,7 @@ export function validateHermesStatus(value: unknown): HermesStatus | null {
         active_tool_calls: activeToolCalls,
         compression_count: compressionCount,
         active_subagents: activeSubagents,
+        total_processed_tokens: totalProcessedTokens,
         yolo
     };
 }

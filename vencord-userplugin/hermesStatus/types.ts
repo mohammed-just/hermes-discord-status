@@ -11,6 +11,7 @@ export interface HermesStatus {
     context_used: number | null;
     context_max: number | null;
     context_percent: number | null;
+    total_processed_tokens: number;
     session_started_at: number;
     turn_started_at: number | null;
     busy: boolean;

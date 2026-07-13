@@ -11,6 +11,7 @@ It combines two components:
 
 - active model
 - current context used / maximum, 10-segment gauge, and percentage
+- cumulative total processed tokens
 - compression count and active subagent count
 - current-turn and session timers
 - bridge update freshness and YOLO indicator when active
@@ -18,6 +19,8 @@ It combines two components:
 - connected, stale, disconnected, or error state
 
 It does **not** add a footer to Discord messages. It does **not** send status data to any remote service.
+
+`Total processed` is cumulative for the current Hermes session/thread. It adds the canonical `usage.total_tokens` from each successful model API request, which covers the provider-processed prompt/input plus output for that request. It is distinct from current context, which remains the latest request's context-window usage. Cached input, reasoning, or other token detail buckets are not added separately, because the canonical total already accounts for the request without double-counting. Child subagent session usage is not included in the parent conversation counter.
 
 ## Privacy model
 
@@ -128,6 +131,7 @@ Manual installation is still possible:
 6. Confirm the status bar appears automatically in the child thread and remains hidden in the selected parent channel while `showInParentChannels=false`.
 7. Enable **Show in selected parent channels** and confirm the bar also appears in the selected parent.
 8. Separately, right-click a specific thread outside any selected parent and choose **Show Hermes status here**; confirm the bar appears in that directly selected thread.
+9. Send a prompt that uses a tool and triggers a follow-up model request; confirm **Total processed** increases cumulatively while context remains the latest request size.
 
 Using **Show Hermes status here** again disables the selected parent scope or directly selected thread. Disabling a parent scope removes its inherited enablement from child threads unless a thread is also selected directly.
 
@@ -146,7 +150,7 @@ The status endpoint is:
 GET /v1/status/discord/<channel-or-thread-id>
 ```
 
-The bridge is a standalone plugin and does not receive a live Hermes agent object. Model, context usage, tool activity, session/turn timing, API errors, subagent activity, YOLO state, and optional compression count are derived only from public Hermes hook payloads and safe session state. If Hermes does not emit a compression count in hook payloads, the bridge reports `0` rather than guessing.
+The bridge is a standalone plugin and does not receive a live Hermes agent object. Model, context usage, total processed tokens, tool activity, session/turn timing, API errors, subagent activity, YOLO state, and optional compression count are derived only from public Hermes hook payloads and safe session state. If Hermes does not emit a compression count in hook payloads, the bridge reports `0` rather than guessing.
 
 To confirm the bridge is listening only on loopback after enabling the plugin:
 

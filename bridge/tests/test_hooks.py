@@ -23,6 +23,7 @@ def load_plugin_modules():
 
 
 hooks, SessionRegistry = load_plugin_modules()
+MAX_SAFE_WIRE_INTEGER = 2**53 - 1
 
 
 class FakeClock:
@@ -137,6 +138,50 @@ class HookTests(unittest.TestCase):
             usage={"prompt_tokens": 10},
         )
         self.assertEqual(registry.get("s1")["compression_count"], 2)
+
+    def test_post_api_request_accumulates_canonical_total_and_keeps_latest_context(self):
+        registry = SessionRegistry(clock=FakeClock())
+        status_hooks = hooks.StatusHooks(registry)
+        status_hooks.on_session_start(session_id="s1", model="m1")
+
+        status_hooks.post_api_request(
+            session_id="s1",
+            model="m1",
+            usage={"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120},
+        )
+        status_hooks.post_api_request(
+            session_id="s1",
+            model="m1",
+            usage={"prompt_tokens": 75, "completion_tokens": 10, "total_tokens": 85},
+        )
+
+        state = registry.get("s1")
+        self.assertEqual(state["context_used"], 75)
+        self.assertEqual(state["total_processed_tokens"], 205)
+
+    def test_post_api_request_ignores_invalid_total_tokens(self):
+        registry = SessionRegistry(clock=FakeClock())
+        status_hooks = hooks.StatusHooks(registry)
+        status_hooks.on_session_start(session_id="s1", model="m1")
+
+        status_hooks.post_api_request(
+            session_id="s1",
+            model="m1",
+            usage={"prompt_tokens": 10, "total_tokens": 25},
+        )
+        for invalid in (None, -1, "12", 1.5, True, False, MAX_SAFE_WIRE_INTEGER + 1):
+            status_hooks.post_api_request(
+                session_id="s1",
+                model="m1",
+                usage={"prompt_tokens": 10, "total_tokens": invalid},
+            )
+        status_hooks.post_api_request(
+            session_id="s1",
+            model="m1",
+            usage={"prompt_tokens": 10, "total_tokens": 0},
+        )
+
+        self.assertEqual(registry.get("s1")["total_processed_tokens"], 25)
 
     def test_subagent_and_yolo_fields_are_real_event_derived(self):
         registry = SessionRegistry(clock=FakeClock())

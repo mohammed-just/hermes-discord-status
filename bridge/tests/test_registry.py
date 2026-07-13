@@ -23,6 +23,7 @@ def load_plugin_package():
 pkg = load_plugin_package()
 SessionRegistry = __import__(pkg.__name__ + ".registry", fromlist=["SessionRegistry"]).SessionRegistry
 StatusHooks = __import__(pkg.__name__ + ".hooks", fromlist=["StatusHooks"]).StatusHooks
+MAX_SAFE_WIRE_INTEGER = 2**53 - 1
 
 
 class FakeClock:
@@ -57,6 +58,7 @@ class RegistryTests(unittest.TestCase):
                 "context_used",
                 "context_max",
                 "context_percent",
+                "total_processed_tokens",
                 "session_started_at",
                 "turn_started_at",
                 "busy",
@@ -72,6 +74,7 @@ class RegistryTests(unittest.TestCase):
         )
         self.assertEqual(state["schema_version"], 1)
         self.assertEqual(state["context_used"], 123)
+        self.assertEqual(state["total_processed_tokens"], 173)
         self.assertEqual(state["compression_count"], 0)
         self.assertEqual(state["active_subagents"], 0)
         self.assertFalse(state["yolo"])
@@ -85,6 +88,7 @@ class RegistryTests(unittest.TestCase):
     def test_safe_tool_transitions(self):
         registry = SessionRegistry(clock=FakeClock())
         registry.start_session("s1", "m1", context_max=1000)
+        self.assertEqual(registry.get("s1")["total_processed_tokens"], 0)
         registry.update_context("s1", 250)
         registry.tool_start("s1", "shell_exec")
         state = registry.get("s1")
@@ -211,6 +215,32 @@ class RegistryTests(unittest.TestCase):
         state = registry.get("new")
         self.assertIsNotNone(state)
         self.assertEqual(state["context_used"], 5)
+
+    def test_total_processed_tokens_accumulates_and_reset_starts_fresh(self):
+        registry = SessionRegistry(clock=FakeClock())
+        registry.start_session("s1", "m1")
+
+        registry.add_total_processed_tokens("s1", 173)
+        registry.add_total_processed_tokens("s1", 25)
+
+        state = registry.get("s1")
+        self.assertEqual(state["total_processed_tokens"], 198)
+
+        registry.reset("s1")
+        registry.start_session("s1", "m1")
+        self.assertEqual(registry.get("s1")["total_processed_tokens"], 0)
+
+    def test_total_processed_tokens_rejects_cumulative_wire_overflow(self):
+        registry = SessionRegistry(clock=FakeClock())
+        registry.start_session("s1", "m1")
+
+        registry.add_total_processed_tokens("s1", MAX_SAFE_WIRE_INTEGER - 5)
+        registry.add_total_processed_tokens("s1", 6)
+
+        self.assertEqual(registry.get("s1")["total_processed_tokens"], MAX_SAFE_WIRE_INTEGER - 5)
+
+        registry.add_total_processed_tokens("s1", 5)
+        self.assertEqual(registry.get("s1")["total_processed_tokens"], MAX_SAFE_WIRE_INTEGER)
 
 
 if __name__ == "__main__":
