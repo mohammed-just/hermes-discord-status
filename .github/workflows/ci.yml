@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bridge:
+    name: Bridge tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # actions/checkout v7
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # actions/setup-python v6
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: python -m pip install pytest==9.1.1 PyYAML==6.0.3
+
+      - name: Run bridge tests
+        run: python -m pytest bridge/tests
+
+      - name: Compile Python sources
+        run: python -m compileall bridge
+
+      - name: Check workflow policy
+        run: python tests/workflow_policy_test.py
+
+  installer:
+    name: Windows installer tests
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # actions/checkout v7
+
+      - name: Parse installer
+        shell: powershell
+        run: |
+          foreach ($script in @(".\install.ps1", ".\install.helpers.ps1")) {
+            $errors = $null
+            $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content -LiteralPath $script -Raw), [ref] $errors)
+            if ($errors.Count -gt 0) {
+              $errors | Format-List *
+              exit 1
+            }
+          }
+
+      - name: Run installer tests
+        shell: powershell
+        run: .\tests\install.Tests.ps1
+
+  vencord:
+    name: Vencord plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout plugin repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # actions/checkout v7
+        with:
+          path: hermes-discord-status
+
+      - name: Checkout Vencord
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # actions/checkout v7
+        with:
+          repository: Vendicated/Vencord
+          ref: 94cc541e38905063988094249a40e618f83a12e4
+          path: Vencord
+
+      - name: Copy userplugin
+        run: |
+          rm -rf Vencord/src/userplugins/hermesStatus
+          cp -a hermes-discord-status/vencord-userplugin/hermesStatus Vencord/src/userplugins/hermesStatus
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b0f76dfb45f55f8421693e4803ac7bb65143bd34 # pnpm/action-setup v6
+        with:
+          version: 11.9.0
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # actions/setup-node v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: Vencord/pnpm-lock.yaml
+
+      - name: Install Vencord dependencies
+        working-directory: Vencord
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint plugin
+        working-directory: Vencord
+        run: pnpm exec eslint src/userplugins/hermesStatus
+
+      - name: Typecheck Vencord
+        working-directory: Vencord
+        run: pnpm testTsc
+
+      - name: Run pure status TypeScript test
+        working-directory: Vencord
+        run: pnpm exec tsx src/userplugins/hermesStatus/tests/statusLogic.test.ts
+
+      - name: Build Vencord
+        working-directory: Vencord
+        run: pnpm build

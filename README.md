@@ -31,14 +31,92 @@ It does **not** add a footer to Discord messages. It does **not** send status da
 - A specific thread can also be selected directly to enable the bar in that thread.
 - The bridge does not expand visibility by itself; it only resolves the channel or thread ID that the Vencord plugin explicitly requests.
 
-## Current local installation
+## Installation
 
-This working copy is a clean source project for editing and eventual publication. The active local installation is currently sourced from:
+Use `install.ps1` from Windows PowerShell. Hermes runs in WSL, while Vencord is a Windows source checkout.
 
-- Hermes bridge source: `/home/mohammed/projects/hermes-discord-status`
-- Vencord userplugin source: `C:\Users\mohammed\Vencord\src\userplugins\hermesStatus`
+```powershell
+.\install.ps1 -VencordPath "$env:USERPROFILE\Vencord"
+```
+
+The installer:
+
+- copies `vencord-userplugin/hermesStatus` to `<VencordPath>\src\userplugins\hermesStatus`;
+- copies `bridge` to `<HermesHome>\plugins\discord-status`;
+- creates `HERMES_DISCORD_STATUS_TOKEN` in `<HermesHome>\.env` only when it is missing or empty;
+- for WSL UNC homes, creates the token temp file empty, hardens it to Linux mode `0600` through a descriptor-based `/usr/bin/python3` helper, then writes the token bytes while preserving that mode;
+- preserves unrelated `.env` entries, accepts the effective last python-dotenv-style token assignment, and rewrites the token as one plain `KEY=value` line;
+- replaces managed destination directories and `.env` in one managed-file transaction: backups are retained until file replacement, token update, WSL mode hardening, and requested Vencord quality gates succeed;
+- runs Vencord quality gates by default: `pnpm install --frozen-lockfile`, plugin ESLint, `pnpm testTsc`, `pnpm exec tsx src/userplugins/hermesStatus/tests/statusLogic.test.ts`, and `pnpm build`;
+- enables the Hermes plugin and restarts the Hermes gateway through the Hermes CLI unless skipped.
+
+The script does not require admin rights. It takes a named single-instance mutex before validation or mutation so accidental concurrent installer runs fail before writes. It validates this source project, the Vencord checkout shape, path overlap, destination types, and destination boundaries before writing. It refuses packaged AppData/dist paths as Vencord plugin source checkouts and rejects unsafe reparse or WSL symlink destinations.
+
+The concurrency boundary is accidental installer overlap, not a malicious concurrent process running as the same OS user. That same principal can already alter the target files directly, so same-user concurrent mutation is outside the installer's security boundary. On detected changes during cleanup or restore, the installer fails conservatively and preserves backups instead of moving changed content live.
 
 Do not put a real token in this repository, screenshots, issue reports, or GitHub Actions logs.
+
+### Installer parameters
+
+```powershell
+.\install.ps1 `
+  -VencordPath "$env:USERPROFILE\Vencord" `
+  -WslDistribution Ubuntu `
+  -HermesHome '\\wsl$\Ubuntu\home\YOUR_LINUX_USER\.hermes'
+```
+
+- `-VencordPath` is required and must point at a Vencord source checkout containing `package.json` and `src\userplugins`.
+- `-WslDistribution` selects a WSL distro for Hermes CLI commands and automatic Hermes home resolution. When `-HermesHome` is a WSL UNC path, the distro is inferred from that path if this parameter is omitted; if supplied, it must match the UNC distro name.
+- `-HermesHome` overrides WSL home resolution. WSL UNC roots must use canonical `\\wsl.localhost\<distro>\...` or `\\wsl$\<distro>\...` paths with no `.` or `..` segments. Explicit non-WSL Windows paths are supported only with `-SkipHermesCommands`, so files cannot be installed locally while Hermes CLI operations target the default WSL distro.
+- `-SkipVencordBuild` skips only the Vencord pnpm quality gates.
+- `-SkipHermesCommands` skips `hermes plugins enable discord-status` and `hermes gateway restart`.
+- `-ShowToken` prints the real installed token in the final summary during an executing install. With `-WhatIf`, no token value is generated or printed because that value would not be installed.
+- `-WhatIf` shows the planned file changes and external commands without writing or invoking pnpm, WSL, or Hermes commands. The installer makes one top-level confirmation decision for the complete installation.
+
+If `-HermesHome` is omitted, the installer asks WSL for `$HOME/.hermes` using a fixed shell command. Distribution names are strictly validated before being passed to `wsl.exe`.
+
+When `-HermesHome` is a WSL UNC path, the installer validates existing Linux path components and expected object types with WSL `lstat`, rejecting symlinks and special files such as FIFOs. It resolves `wsl.exe` from the Windows system directory rather than process `PATH`, creates an empty `.env` temp file, then invokes `wsl.exe -d <distro> -- /usr/bin/python3 ...` to open the file with `O_NOFOLLOW`, verify it is a regular file under the approved Hermes home, `fchmod(0600)` it by descriptor, and verify the mode before token bytes are written. This hardening is not skipped by `-SkipHermesCommands`; that switch only skips `hermes plugins enable` and `hermes gateway restart`. If mode hardening fails, the installer rolls back the managed plugin and `.env` changes.
+
+Existing symlinked or junction-backed managed destinations are rejected rather than followed or overwritten. If an older manual installation used `~/.hermes/plugins/discord-status` as a symlink, inspect its target first, unlink only the symlink from inside WSL, and rerun the installer; the installer will not migrate that link automatically.
+
+Vencord quality gates may update checkout-local outputs such as `node_modules` and `dist`; those pnpm side effects are not rolled back. After managed files and `.env` are committed, Hermes CLI enable/restart failures do not roll them back. In that case, leave the installed files in place and rerun:
+
+```powershell
+wsl.exe -d <distro> -- hermes plugins enable discord-status
+wsl.exe -d <distro> -- hermes gateway restart
+```
+
+To retrieve the bridge token later, read `HERMES_DISCORD_STATUS_TOKEN` from `<HermesHome>\.env` locally and paste it into the Vencord plugin settings.
+
+### Vencord injection
+
+The installer builds the Vencord checkout but intentionally does not patch or inject Discord. After a successful build, explicitly run Vencord's installer in development-install mode, then fully quit and restart Discord. The patched Discord `app.asar` must load the checkout's `dist/patcher.js`, not an older `%APPDATA%\Vencord\dist\patcher.js`.
+
+A gateway-hosted Hermes plugin invocation cannot restart the gateway that is currently hosting it. Normal Windows installer use runs outside Hermes, so it can call `hermes gateway restart` unless `-SkipHermesCommands` is used.
+
+### Manual alternative
+
+Manual installation is still possible:
+
+1. Copy `vencord-userplugin/hermesStatus` to `Vencord\src\userplugins\hermesStatus`.
+2. Copy `bridge` to `~/.hermes/plugins/discord-status`.
+3. Add a strong local `HERMES_DISCORD_STATUS_TOKEN` to `~/.hermes/.env`.
+4. In the Vencord checkout, run:
+
+   ```powershell
+   pnpm install --frozen-lockfile
+   pnpm exec eslint src/userplugins/hermesStatus
+   pnpm testTsc
+   pnpm exec tsx src/userplugins/hermesStatus/tests/statusLogic.test.ts
+   pnpm build
+   ```
+
+5. Run Vencord's development installer, restart Discord, then enable and restart Hermes:
+
+   ```bash
+   hermes plugins enable discord-status
+   hermes gateway restart
+   ```
 
 ## Test it in Discord
 
@@ -53,47 +131,14 @@ Do not put a real token in this repository, screenshots, issue reports, or GitHu
 
 Using **Show Hermes status here** again disables the selected parent scope or directly selected thread. Disabling a parent scope removes its inherited enablement from child threads unless a thread is also selected directly.
 
-## Development setup on Windows
+## Development references
 
 Vencord userplugins are compiled into a custom Vencord build; copying the folder into AppData alone is not sufficient.
-
-1. Clone the official Vencord source repository.
-2. Copy `vencord-userplugin/hermesStatus` into `Vencord/src/userplugins/hermesStatus`.
-3. From PowerShell in the Vencord checkout:
-
-   ```powershell
-   pnpm install --frozen-lockfile
-   pnpm exec eslint src/userplugins/hermesStatus
-   pnpm testTsc
-   pnpm build
-   ```
-
-4. Install the development build using Vencord's installer in development-install mode. The patched Discord `app.asar` must load the **checkout's** `dist/patcher.js`, not an older `%APPDATA%\Vencord\dist\patcher.js`.
-5. Fully quit and restart Discord.
 
 Official Vencord references:
 
 - https://docs.vencord.dev/installing/custom-plugins/
 - https://docs.vencord.dev/plugins/
-
-## Hermes bridge installation
-
-The bridge is an external Hermes plugin. On the machine running Hermes:
-
-1. Copy or symlink the contents of `bridge/` to `~/.hermes/plugins/discord-status/`.
-2. Generate a random local bearer token and store it only in `~/.hermes/.env` as `HERMES_DISCORD_STATUS_TOKEN`.
-3. Enable the plugin:
-
-   ```bash
-   hermes plugins enable discord-status
-   hermes gateway restart
-   ```
-
-4. Confirm the bridge is listening only on loopback:
-
-   ```bash
-   ss -ltn '( sport = :8765 )'
-   ```
 
 The status endpoint is:
 
@@ -103,28 +148,51 @@ GET /v1/status/discord/<channel-or-thread-id>
 
 The bridge is a standalone plugin and does not receive a live Hermes agent object. Model, context usage, tool activity, session/turn timing, API errors, subagent activity, YOLO state, and optional compression count are derived only from public Hermes hook payloads and safe session state. If Hermes does not emit a compression count in hook payloads, the bridge reports `0` rather than guessing.
 
+To confirm the bridge is listening only on loopback after enabling the plugin:
+
+```bash
+ss -ltn '( sport = :8765 )'
+```
+
+## Continuous integration
+
+GitHub Actions runs these validations with read-only GitHub token permissions across three jobs:
+
+- Bridge tests on Ubuntu with Python 3.11: `pytest` and `compileall`.
+- Installer tests on `windows-latest`: PowerShell parser check and `tests/install.Tests.ps1`.
+- Workflow policy test on Ubuntu: parses `.github/workflows/ci.yml` and structurally enforces immutable pinned action SHAs, read-only permissions, the pinned Vencord commit, and the standalone `tsx` status test command.
+- Vencord plugin validation on Ubuntu: checks out official Vencord at `94cc541e38905063988094249a40e618f83a12e4`, copies this exact userplugin, uses Node 24 and pnpm 11.9.0, then runs frozen install, plugin ESLint, `testTsc`, `pnpm exec tsx src/userplugins/hermesStatus/tests/statusLogic.test.ts`, and build.
+
 ## Repository release checklist
 
 Before publishing:
 
 - [ ] Add screenshots or a short demo GIF with no private Discord content.
-- [ ] Replace this local-install section with a tested `install.ps1`.
-- [ ] Add a GitHub Actions workflow for bridge tests and Vencord type checking.
-- [ ] Verify no secrets with `git grep -n -i 'token\|api.key\|password'` and inspect every hit.
-- [ ] Never commit `.env`, Vencord settings, `node_modules`, `dist`, or local Discord paths.
-- [ ] Set a local Git identity before the first commit.
+- [x] Replace this local-install section with a tested `install.ps1`.
+- [x] Add a GitHub Actions workflow for bridge tests and Vencord type checking.
+- [x] Verify no secrets with `git grep -n -i 'token\|api.key\|password'` and inspect every hit.
+- [x] Never commit `.env`, Vencord settings, `node_modules`, `dist`, or local Discord paths.
+- [x] Set a local Git identity before the first commit.
 
 ## Layout
 
 ```text
 hermes-discord-status/
+├── .github/
+│   └── workflows/
+│       └── ci.yml
 ├── bridge/                         # Hermes external plugin
 │   ├── plugin.yaml
 │   ├── server.py
 │   ├── routing.py
 │   └── tests/
+├── tests/
+│   ├── install.Tests.ps1
+│   └── workflow_policy_test.py
 ├── vencord-userplugin/
 │   └── hermesStatus/               # Copy into Vencord/src/userplugins/
+├── install.ps1
+├── install.helpers.ps1
 ├── README.md
 ├── LICENSE
 └── .gitignore
