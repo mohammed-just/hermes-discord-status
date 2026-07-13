@@ -1267,6 +1267,10 @@ Invoke-Test "Disposable WSL token temp is mode 600 before secret write" {
         New-Item -ItemType Directory -Force -Path $hermes | Out-Null
         $envPath = Join-Path $hermes ".env"
         $script:InstallExecute = $true
+        $wsl = (Get-Command "wsl.exe" -ErrorAction Stop).Source
+        & $wsl -d $distribution -- mkdir -p "$($wslTemp.LinuxPath)/outside"
+        & $wsl -d $distribution -- ln -s "$($wslTemp.LinuxPath)/outside" "$($wslTemp.LinuxPath)/.hermes/unrelated-link"
+        Assert-Equal 0 $LASTEXITCODE "Could not create unrelated disposable WSL symlink."
         $script:HermesInstallerFaultInjector = {
             param([string] $Point, [string] $Path)
             if ($Point -ne ".env-before-temp-write") {

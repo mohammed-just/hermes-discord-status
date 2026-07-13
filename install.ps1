@@ -957,6 +957,7 @@ function New-WslPathSafetyCallback {
         ApprovedLinuxRoot = $ApprovedLinuxRoot
         Label = $Label
         ExpectedKind = $ExpectedKind
+        RejectTreeSymlinks = ($ExpectedKind -eq "Directory")
     }
 }
 
@@ -984,7 +985,10 @@ function Invoke-HermesOperationSafety {
         }
         if ($safety.Type -eq "Wsl") {
             $parsed = ConvertFrom-HermesWslUncPath -Path $Path -WslDistribution $safety.Distribution
-            $rejectTreeSymlinks = Test-Path -LiteralPath $Path -PathType Container
+            $rejectTreeSymlinks = $false
+            if ($safety.ContainsKey("RejectTreeSymlinks") -and $safety.RejectTreeSymlinks) {
+                $rejectTreeSymlinks = Test-Path -LiteralPath $Path -PathType Container
+            }
             Resolve-HermesWslSafePath -ParsedPath $parsed -ApprovedLinuxRoot $safety.ApprovedLinuxRoot -RejectTreeSymlinks:$rejectTreeSymlinks -ExpectedKind $safety.ExpectedKind | Out-Null
             return
         }
