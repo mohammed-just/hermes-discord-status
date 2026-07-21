@@ -6,6 +6,7 @@
 
 import { isStatusStale, validateHermesStatus } from "../api";
 import { buildStatusFields, statusFieldClassName, statusFieldGroupClassName } from "../format";
+import { DEFAULT_POLL_INTERVAL_MS, scheduleDeferredStatusStart, STATUS_STARTUP_DELAY_MS } from "../polling";
 import type { HermesStatus } from "../types";
 
 function assertEqual<T>(actual: T, expected: T): void {
@@ -13,6 +14,44 @@ function assertEqual<T>(actual: T, expected: T): void {
         throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
     }
 }
+
+assertEqual(DEFAULT_POLL_INTERVAL_MS, 5000);
+
+let idleCallback: (() => void) | undefined;
+let idleTimeout: number | undefined;
+let idleCancels = 0;
+let startupCalls = 0;
+const cancelDeferredStart = scheduleDeferredStatusStart(() => startupCalls++, {
+    requestIdleCallback: (callback, options) => {
+        idleCallback = callback;
+        idleTimeout = options.timeout;
+        return 1;
+    },
+    cancelIdleCallback: () => idleCancels++,
+    setTimeout: () => { throw new Error("Idle-capable scheduler must not use setTimeout"); },
+    clearTimeout: () => { }
+});
+assertEqual(startupCalls, 0);
+assertEqual(idleTimeout, STATUS_STARTUP_DELAY_MS);
+idleCallback?.();
+assertEqual(startupCalls, 1);
+cancelDeferredStart();
+
+let fallbackCallback: (() => void) | undefined;
+let fallbackDelay: number | undefined;
+let fallbackCalls = 0;
+scheduleDeferredStatusStart(() => fallbackCalls++, {
+    setTimeout: (callback, delay) => {
+        fallbackCallback = callback;
+        fallbackDelay = delay;
+        return 2;
+    },
+    clearTimeout: () => { }
+});
+assertEqual(fallbackCalls, 0);
+assertEqual(fallbackDelay, STATUS_STARTUP_DELAY_MS);
+fallbackCallback?.();
+assertEqual(fallbackCalls, 1);
 
 const status: HermesStatus = {
     schema_version: 1,

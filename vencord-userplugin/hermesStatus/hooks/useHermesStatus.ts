@@ -7,6 +7,7 @@
 import { useEffect, useState } from "@webpack/common";
 
 import { fetchHermesStatus, isStatusStale, nextBackoffMs, normalizePollInterval } from "../api";
+import { scheduleDeferredStatusStart } from "../polling";
 import type { HermesSnapshot, PollConfig } from "../types";
 
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -87,10 +88,11 @@ export function useHermesStatus(channelId: string | null, enabled: boolean, conf
             }
         };
 
-        poll();
+        const cancelDeferredStart = scheduleDeferredStatusStart(poll);
 
         return () => {
             cancelled = true;
+            cancelDeferredStart();
             if (timeout) clearTimeout(timeout);
             if (requestTimeout) clearTimeout(requestTimeout);
             controller?.abort();

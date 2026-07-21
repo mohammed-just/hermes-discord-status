@@ -7,9 +7,8 @@
 import { definePluginSettings } from "@api/Settings";
 import { OptionType } from "@utils/types";
 
+import { DEFAULT_POLL_INTERVAL_MS } from "./polling";
 import { BridgeTokenControl } from "./secret";
-
-export const DEFAULT_POLL_INTERVAL_MS = 2000;
 
 export const settings = definePluginSettings({
     bridgeUrl: {
