@@ -222,5 +222,5 @@ const unavailableFields = buildStatusFields({
     error: null,
     receivedAt: null
 }, 180_000);
-assertEqual(unavailableFields.find(field => field.id === "gauge")?.value, "--");
+assertEqual(unavailableFields.find(field => field.id === "gauge")?.value, "[░░░░░░░░░░] --");
 assertEqual(unavailableFields.find(field => field.id === "connection")?.value, "●");
