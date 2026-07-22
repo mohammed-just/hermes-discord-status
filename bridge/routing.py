@@ -56,14 +56,14 @@ def _matches_discord_channel(entry: dict[str, Any], channel_id: str, *, now: flo
     platform = str(entry.get("platform") or entry.get("source") or origin.get("platform") or "").lower()
     if platform != "discord":
         return False
-    candidates = {
-        str(entry.get("chat_id") or ""),
-        str(entry.get("thread_id") or ""),
-        str(entry.get("parent_chat_id") or ""),
-        str(origin.get("chat_id") or ""),
-        str(origin.get("thread_id") or ""),
-        str(origin.get("parent_chat_id") or ""),
-    }
+    thread_id = str(entry.get("thread_id") or origin.get("thread_id") or "")
+    if thread_id:
+        candidates = {thread_id}
+    else:
+        candidates = {
+            str(entry.get("chat_id") or ""),
+            str(origin.get("chat_id") or ""),
+        }
     if channel_id not in candidates:
         return False
     route_ids = [value for value in candidates if value]

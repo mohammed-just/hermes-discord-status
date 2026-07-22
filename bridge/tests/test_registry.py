@@ -41,10 +41,12 @@ class RegistryTests(unittest.TestCase):
         hooks = StatusHooks(registry)
 
         hooks.on_session_start(session_id="s1", model="m1")
-        hooks.pre_api_request(session_id="s1", model="m1", approx_input_tokens=100)
+        hooks.pre_api_request(session_id="s1", model="m1", approx_input_tokens=100, api_request_id="r1", turn_id="t1")
         hooks.post_api_request(
             session_id="s1",
             model="m1",
+            api_request_id="r1",
+            turn_id="t1",
             usage={"prompt_tokens": 123, "completion_tokens": 50, "total_tokens": 173},
         )
 
@@ -88,7 +90,7 @@ class RegistryTests(unittest.TestCase):
     def test_safe_tool_transitions(self):
         registry = SessionRegistry(clock=FakeClock())
         registry.start_session("s1", "m1", context_max=1000)
-        self.assertEqual(registry.get("s1")["total_processed_tokens"], 0)
+        self.assertIsNone(registry.get("s1")["total_processed_tokens"])
         registry.update_context("s1", 250)
         registry.tool_start("s1", "shell_exec")
         state = registry.get("s1")
@@ -190,7 +192,7 @@ class RegistryTests(unittest.TestCase):
         self.assertIsNotNone(registry.get("middle"))
         self.assertIsNotNone(registry.get("newest"))
 
-    def test_start_turn_keeps_activated_session_when_trim_runs(self):
+    def test_missing_session_start_turn_does_not_create_or_trim(self):
         clock = FakeClock(1000.0)
         registry = SessionRegistry(max_sessions=1, clock=clock)
         registry.start_session("existing", "m")
@@ -198,12 +200,10 @@ class RegistryTests(unittest.TestCase):
 
         registry.start_turn("new", "m")
 
-        self.assertIsNone(registry.get("existing"))
-        state = registry.get("new")
-        self.assertIsNotNone(state)
-        self.assertTrue(state["busy"])
+        self.assertIsNotNone(registry.get("existing"))
+        self.assertIsNone(registry.get("new"))
 
-    def test_missing_session_update_keeps_created_session_when_trim_runs(self):
+    def test_missing_session_update_context_does_not_create_or_trim(self):
         clock = FakeClock(1000.0)
         registry = SessionRegistry(max_sessions=1, clock=clock)
         registry.start_session("existing", "m")
@@ -211,36 +211,200 @@ class RegistryTests(unittest.TestCase):
 
         registry.update_context("new", 5)
 
-        self.assertIsNone(registry.get("existing"))
-        state = registry.get("new")
-        self.assertIsNotNone(state)
-        self.assertEqual(state["context_used"], 5)
+        self.assertIsNotNone(registry.get("existing"))
+        self.assertIsNone(registry.get("new"))
 
-    def test_total_processed_tokens_accumulates_and_reset_starts_fresh(self):
+    def test_missing_session_registry_mutators_do_not_create_state(self):
         registry = SessionRegistry(clock=FakeClock())
-        registry.start_session("s1", "m1")
 
-        registry.add_total_processed_tokens("s1", 173)
-        registry.add_total_processed_tokens("s1", 25)
+        registry.tool_start("missing", "shell_exec", tool_call_id="tool-1")
+        registry.update_compression_count("missing", 1)
+        registry.update_compression_count("missing", increment=1)
+        registry.update_subagents("missing", 1)
+        registry.update_background_subagents("missing", 1)
+        registry.set_yolo("missing", True)
 
-        state = registry.get("s1")
-        self.assertEqual(state["total_processed_tokens"], 198)
+        self.assertIsNone(registry.get("missing"))
 
-        registry.reset("s1")
-        registry.start_session("s1", "m1")
-        self.assertEqual(registry.get("s1")["total_processed_tokens"], 0)
-
-    def test_total_processed_tokens_rejects_cumulative_wire_overflow(self):
+    def test_total_processed_tokens_accumulates_only_matched_current_requests(self):
         registry = SessionRegistry(clock=FakeClock())
-        registry.start_session("s1", "m1")
+        hooks = StatusHooks(registry)
+        hooks.on_session_start(session_id="s1", model="m1")
 
-        registry.add_total_processed_tokens("s1", MAX_SAFE_WIRE_INTEGER - 5)
-        registry.add_total_processed_tokens("s1", 6)
+        hooks.pre_api_request(session_id="s1", model="m1", api_request_id="r1", turn_id="t1")
+        hooks.post_api_request(session_id="s1", model="m1", api_request_id="r1", turn_id="t1", usage={"total_tokens": 173})
+        hooks.pre_api_request(session_id="s1", model="m1", api_request_id="r2", turn_id="t1")
+        hooks.post_api_request(session_id="s1", model="m1", api_request_id="r2", turn_id="t1", usage={"total_tokens": 25})
 
-        self.assertEqual(registry.get("s1")["total_processed_tokens"], MAX_SAFE_WIRE_INTEGER - 5)
+        self.assertEqual(registry.get("s1")["total_processed_tokens"], 198)
 
-        registry.add_total_processed_tokens("s1", 5)
-        self.assertEqual(registry.get("s1")["total_processed_tokens"], MAX_SAFE_WIRE_INTEGER)
+    def test_duplicate_completed_api_request_does_not_double_count(self):
+        registry = SessionRegistry(clock=FakeClock())
+        hooks = StatusHooks(registry)
+        hooks.on_session_start(session_id="s1", model="m1")
+
+        hooks.pre_api_request(session_id="s1", model="m1", api_request_id="r1", turn_id="t1")
+        hooks.post_api_request(session_id="s1", model="m1", api_request_id="r1", turn_id="t1", usage={"total_tokens": 173})
+        hooks.post_api_request(session_id="s1", model="m1", api_request_id="r1", turn_id="t1", usage={"total_tokens": 173})
+
+        self.assertEqual(registry.get("s1")["total_processed_tokens"], 173)
+
+    def test_reset_clears_memory_and_late_pre_post_do_not_recreate_state(self):
+        registry = SessionRegistry(clock=FakeClock())
+        hooks = StatusHooks(registry)
+        hooks.on_session_start(session_id="s1", model="m1")
+        hooks.pre_api_request(session_id="s1", model="m1", api_request_id="r1", turn_id="t1")
+
+        hooks.on_session_reset(session_id="s1")
+        hooks.pre_api_request(session_id="s1", model="m1", api_request_id="late", turn_id="t1")
+        hooks.post_api_request(session_id="s1", model="m1", api_request_id="r1", turn_id="t1", usage={"total_tokens": 173})
+
+        self.assertIsNone(registry.get("s1"))
+
+        hooks.on_session_start(session_id="s1", model="m1")
+        self.assertIsNone(registry.get("s1")["total_processed_tokens"])
+        hooks.pre_api_request(session_id="s1", model="m1", api_request_id="r2", turn_id="t2")
+        hooks.post_api_request(session_id="s1", model="m1", api_request_id="r2", turn_id="t2", usage={"total_tokens": 25})
+
+        self.assertEqual(registry.get("s1")["total_processed_tokens"], 25)
+
+    def test_unmatched_completion_marks_lifecycle_unknown_until_new_session_start(self):
+        registry = SessionRegistry(clock=FakeClock())
+        hooks = StatusHooks(registry)
+        hooks.on_session_start(session_id="s1", model="m1")
+        hooks.pre_api_request(session_id="s1", model="m1", api_request_id="r1", turn_id="t1")
+        hooks.post_api_request(session_id="s1", model="m1", api_request_id="r1", turn_id="t1", usage={"total_tokens": 173})
+
+        hooks.post_api_request(session_id="s1", model="m1", api_request_id="missing", turn_id="t1", usage={"total_tokens": 25})
+        hooks.pre_api_request(session_id="s1", model="m1", api_request_id="r2", turn_id="t1")
+        hooks.post_api_request(session_id="s1", model="m1", api_request_id="r2", turn_id="t1", usage={"total_tokens": 25})
+
+        self.assertIsNone(registry.get("s1")["total_processed_tokens"])
+
+        hooks.on_session_start(session_id="s1", model="m1")
+        hooks.pre_api_request(session_id="s1", model="m1", api_request_id="r3", turn_id="t2")
+        hooks.post_api_request(session_id="s1", model="m1", api_request_id="r3", turn_id="t2", usage={"total_tokens": 10})
+
+        self.assertEqual(registry.get("s1")["total_processed_tokens"], 10)
+
+    def test_api_request_identity_match_is_exact_without_whitespace_normalization(self):
+        registry = SessionRegistry(clock=FakeClock())
+        hooks = StatusHooks(registry)
+
+        hooks.on_session_start(session_id="s1", model="m1")
+        hooks.pre_api_request(session_id="s1", model="m1", api_request_id=" r1 ", turn_id=" t1 ")
+        hooks.post_api_request(session_id="s1", model="m1", api_request_id="r1", turn_id="t1", usage={"total_tokens": 7})
+        self.assertIsNone(registry.get("s1")["total_processed_tokens"])
+
+        hooks.on_session_start(session_id="s1", model="m1")
+        hooks.pre_api_request(session_id="s1", model="m1", api_request_id="r2", turn_id="t2")
+        hooks.post_api_request(session_id="s1", model="m1", api_request_id=" r2 ", turn_id=" t2 ", usage={"total_tokens": 7})
+        self.assertIsNone(registry.get("s1")["total_processed_tokens"])
+
+    def test_invalid_pre_request_identity_marks_existing_lifecycle_unknown(self):
+        registry = SessionRegistry(clock=FakeClock())
+        hooks = StatusHooks(registry)
+        hooks.on_session_start(session_id="s1", model="m1")
+        hooks.pre_api_request(session_id="s1", model="m1", api_request_id="r1", turn_id="t1")
+        hooks.post_api_request(session_id="s1", model="m1", api_request_id="r1", turn_id="t1", usage={"total_tokens": 10})
+
+        for api_request_id, turn_id in (("", "t2"), ("  ", "t2"), ("r2", ""), ("r2", "  "), (0, "t2"), ("r2", 0), (False, "t2"), ("r2", False)):
+            hooks.pre_api_request(session_id="s1", model="m1", api_request_id=api_request_id, turn_id=turn_id)
+            self.assertIsNone(registry.get("s1")["total_processed_tokens"])
+            hooks.on_session_start(session_id="s1", model="m1")
+            hooks.pre_api_request(session_id="s1", model="m1", api_request_id="seed", turn_id="turn")
+            hooks.post_api_request(session_id="s1", model="m1", api_request_id="seed", turn_id="turn", usage={"total_tokens": 10})
+
+    def test_invalid_and_unmatched_completion_identities_mark_existing_lifecycle_unknown(self):
+        registry = SessionRegistry(clock=FakeClock())
+        hooks = StatusHooks(registry)
+        hooks.on_session_start(session_id="s1", model="m1")
+        hooks.pre_api_request(session_id="s1", model="m1", api_request_id="seed", turn_id="turn")
+        hooks.post_api_request(session_id="s1", model="m1", api_request_id="seed", turn_id="turn", usage={"total_tokens": 10})
+
+        for api_request_id, turn_id in ((None, "t1"), ("r1", None), (0, "t1"), ("r1", 0), (False, "t1"), ("r1", False), ("missing", "turn")):
+            hooks.post_api_request(session_id="s1", model="m1", api_request_id=api_request_id, turn_id=turn_id, usage={"total_tokens": 5})
+            self.assertIsNone(registry.get("s1")["total_processed_tokens"])
+            hooks.on_session_start(session_id="s1", model="m1")
+            hooks.pre_api_request(session_id="s1", model="m1", api_request_id="seed", turn_id="turn")
+            hooks.post_api_request(session_id="s1", model="m1", api_request_id="seed", turn_id="turn", usage={"total_tokens": 10})
+
+    def test_invalid_and_unmatched_error_identities_mark_existing_lifecycle_unknown(self):
+        registry = SessionRegistry(clock=FakeClock())
+        hooks = StatusHooks(registry)
+        hooks.on_session_start(session_id="s1", model="m1")
+        hooks.pre_api_request(session_id="s1", model="m1", api_request_id="seed", turn_id="turn")
+        hooks.post_api_request(session_id="s1", model="m1", api_request_id="seed", turn_id="turn", usage={"total_tokens": 10})
+
+        for api_request_id, turn_id in ((None, "t1"), ("r1", None), (0, "t1"), ("r1", 0), (False, "t1"), ("r1", False), ("missing", "turn")):
+            hooks.api_request_error(session_id="s1", api_request_id=api_request_id, turn_id=turn_id)
+            self.assertIsNone(registry.get("s1")["total_processed_tokens"])
+            hooks.on_session_start(session_id="s1", model="m1")
+            hooks.pre_api_request(session_id="s1", model="m1", api_request_id="seed", turn_id="turn")
+            hooks.post_api_request(session_id="s1", model="m1", api_request_id="seed", turn_id="turn", usage={"total_tokens": 10})
+
+    def test_pending_api_request_capacity_marks_unknown_without_retaining_overflow(self):
+        registry = SessionRegistry(clock=FakeClock(), max_pending_api_requests=1)
+        hooks = StatusHooks(registry)
+        hooks.on_session_start(session_id="s1", model="m1")
+
+        hooks.pre_api_request(session_id="s1", model="m1", api_request_id="r1", turn_id="t1")
+        hooks.pre_api_request(session_id="s1", model="m1", api_request_id="r2", turn_id="t1")
+
+        self.assertIsNone(registry.get("s1")["total_processed_tokens"])
+        self.assertEqual(len(registry._pending_api_requests["s1"]), 1)
+        self.assertNotIn(("r2", "t1"), registry._pending_api_requests["s1"])
+
+    def test_completed_api_request_capacity_marks_unknown_without_evicting_retained_duplicates(self):
+        registry = SessionRegistry(clock=FakeClock(), max_completed_api_requests=1)
+        hooks = StatusHooks(registry)
+        hooks.on_session_start(session_id="s1", model="m1")
+
+        hooks.pre_api_request(session_id="s1", model="m1", api_request_id="r1", turn_id="t1")
+        hooks.post_api_request(session_id="s1", model="m1", api_request_id="r1", turn_id="t1", usage={"total_tokens": 10})
+        hooks.post_api_request(session_id="s1", model="m1", api_request_id="r1", turn_id="t1", usage={"total_tokens": 10})
+        self.assertEqual(registry.get("s1")["total_processed_tokens"], 10)
+
+        hooks.pre_api_request(session_id="s1", model="m1", api_request_id="r2", turn_id="t1")
+        hooks.post_api_request(session_id="s1", model="m1", api_request_id="r2", turn_id="t1", usage={"total_tokens": 5})
+        self.assertIsNone(registry.get("s1")["total_processed_tokens"])
+
+        hooks.post_api_request(session_id="s1", model="m1", api_request_id="r2", turn_id="t1", usage={"total_tokens": 5})
+        self.assertIsNone(registry.get("s1")["total_processed_tokens"])
+
+    def test_invalid_total_and_error_for_matching_pending_request_mark_unknown(self):
+        registry = SessionRegistry(clock=FakeClock())
+        hooks = StatusHooks(registry)
+        hooks.on_session_start(session_id="s1", model="m1")
+        hooks.pre_api_request(session_id="s1", model="m1", api_request_id="r1", turn_id="t1")
+        hooks.post_api_request(session_id="s1", model="m1", api_request_id="r1", turn_id="t1", usage={"total_tokens": 25})
+        hooks.pre_api_request(session_id="s1", model="m1", api_request_id="bad", turn_id="t1")
+        hooks.post_api_request(session_id="s1", model="m1", api_request_id="bad", turn_id="t1", usage={"total_tokens": "26"})
+
+        self.assertIsNone(registry.get("s1")["total_processed_tokens"])
+
+        hooks.on_session_start(session_id="s2", model="m1")
+        hooks.pre_api_request(session_id="s2", model="m1", api_request_id="err", turn_id="t1")
+        hooks.api_request_error(session_id="s2", api_request_id="err", turn_id="t1", error={"message": "boom"})
+
+        self.assertIsNone(registry.get("s2")["total_processed_tokens"])
+
+    def test_total_processed_tokens_wire_overflow_marks_unknown(self):
+        registry = SessionRegistry(clock=FakeClock())
+        hooks = StatusHooks(registry)
+        hooks.on_session_start(session_id="s1", model="m1")
+        hooks.pre_api_request(session_id="s1", model="m1", api_request_id="r1", turn_id="t1")
+        hooks.post_api_request(
+            session_id="s1",
+            model="m1",
+            api_request_id="r1",
+            turn_id="t1",
+            usage={"total_tokens": MAX_SAFE_WIRE_INTEGER - 5},
+        )
+        hooks.pre_api_request(session_id="s1", model="m1", api_request_id="r2", turn_id="t1")
+        hooks.post_api_request(session_id="s1", model="m1", api_request_id="r2", turn_id="t1", usage={"total_tokens": 6})
+
+        self.assertIsNone(registry.get("s1")["total_processed_tokens"])
 
 
 if __name__ == "__main__":

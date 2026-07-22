@@ -151,6 +151,8 @@ class StatusHooks:
 
     def pre_api_request(self, **kw) -> None:
         session_id = kw.get("session_id") or ""
+        if not self.registry.has_session(session_id):
+            return
         approx = _positive_int(kw.get("approx_input_tokens"))
         self.registry.start_turn(
             session_id,
@@ -158,19 +160,26 @@ class StatusHooks:
             context_max=resolve_context_max(kw.get("model") or "", kw.get("provider"), kw.get("base_url")),
             yolo=self._yolo_active(session_id, kw.get("yolo")),
         )
+        self.registry.track_api_request_start(session_id, kw.get("api_request_id"), kw.get("turn_id"))
         self.registry.update_context(session_id, approx)
 
     def post_api_request(self, **kw) -> None:
         session_id = kw.get("session_id") or ""
+        total_tokens = _usage_total_tokens(kw.get("usage"))
+        completion = self.registry.complete_api_request(
+            session_id,
+            kw.get("api_request_id"),
+            kw.get("turn_id"),
+            total_tokens,
+        )
+        if completion != "accepted":
+            return None
         used = _usage_prompt_tokens(kw.get("usage"))
         self.registry.update_context(
             session_id,
             used,
             context_max=resolve_context_max(kw.get("model") or "", kw.get("provider"), kw.get("base_url")),
         )
-        total_tokens = _usage_total_tokens(kw.get("usage"))
-        if total_tokens is not None:
-            self.registry.add_total_processed_tokens(session_id, total_tokens)
         # Public post_api_request hooks do not always include compression_count.
         # Keep the registry's explicit zero/last-known value unless Hermes
         # supplies a concrete count; never infer it from usage or lifecycle events.
@@ -181,7 +190,9 @@ class StatusHooks:
     def api_request_error(self, **kw) -> None:
         # Provider errors may contain prompts, request details, or credentials.
         # Publish only this fixed allow-listed message and retain the outer turn.
-        self.registry.set_error(kw.get("session_id") or "", PUBLIC_API_ERROR)
+        session_id = kw.get("session_id") or ""
+        self.registry.mark_api_request_error(session_id, kw.get("api_request_id"), kw.get("turn_id"))
+        self.registry.set_error(session_id, PUBLIC_API_ERROR)
 
     def pre_tool_call(self, **kw) -> None:
         self.registry.tool_start(

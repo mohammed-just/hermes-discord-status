@@ -80,6 +80,43 @@ class HookTests(unittest.TestCase):
 
         self.assertEqual(registry.get("s1")["turn_started_at"], started_at)
 
+    def test_pre_llm_call_requires_existing_session_before_and_after_reset(self):
+        registry = SessionRegistry(clock=FakeClock())
+        status_hooks = hooks.StatusHooks(registry)
+
+        status_hooks.pre_llm_call(session_id="s1", model="m1")
+        self.assertIsNone(registry.get("s1"))
+
+        status_hooks.on_session_start(session_id="s1", model="m1")
+        status_hooks.pre_llm_call(session_id="s1", model="m1")
+        self.assertTrue(registry.get("s1")["busy"])
+
+        status_hooks.on_session_reset(session_id="s1")
+        status_hooks.pre_llm_call(session_id="s1", model="m1")
+        self.assertIsNone(registry.get("s1"))
+
+    def test_late_non_session_start_hooks_do_not_create_missing_session(self):
+        registry = SessionRegistry(clock=FakeClock())
+        status_hooks = hooks.StatusHooks(registry)
+
+        late_hooks = (
+            lambda: status_hooks.on_session_end(session_id="missing"),
+            lambda: status_hooks.on_session_finalize(session_id="missing"),
+            lambda: status_hooks.on_session_reset(session_id="missing"),
+            lambda: status_hooks.pre_llm_call(session_id="missing", model="m1"),
+            lambda: status_hooks.post_llm_call(session_id="missing"),
+            lambda: status_hooks.pre_api_request(session_id="missing", model="m1", api_request_id="r1", turn_id="t1", approx_input_tokens=5),
+            lambda: status_hooks.post_api_request(session_id="missing", model="m1", api_request_id="r1", turn_id="t1", usage={"prompt_tokens": 5, "total_tokens": 5}),
+            lambda: status_hooks.api_request_error(session_id="missing", api_request_id="r1", turn_id="t1"),
+            lambda: status_hooks.pre_tool_call(session_id="missing", tool_name="shell_exec", tool_call_id="tool-1"),
+            lambda: status_hooks.post_tool_call(session_id="missing", tool_name="shell_exec", tool_call_id="tool-1"),
+            lambda: status_hooks.subagent_start(parent_session_id="missing"),
+            lambda: status_hooks.subagent_stop(parent_session_id="missing"),
+        )
+        for late_hook in late_hooks:
+            late_hook()
+            self.assertIsNone(registry.get("missing"))
+
     def test_post_llm_call_does_not_finish_outer_turn(self):
         registry = SessionRegistry(clock=FakeClock())
         status_hooks = hooks.StatusHooks(registry)
@@ -120,13 +157,18 @@ class HookTests(unittest.TestCase):
         status_hooks.post_api_request(
             session_id="s1",
             model="m1",
+            api_request_id="r1",
+            turn_id="t1",
             usage={"prompt_tokens": 50},
         )
         self.assertEqual(registry.get("s1")["compression_count"], 0)
 
+        status_hooks.pre_api_request(session_id="s1", model="m1", api_request_id="r2", turn_id="t1")
         status_hooks.post_api_request(
             session_id="s1",
             model="m1",
+            api_request_id="r2",
+            turn_id="t1",
             usage={"prompt_tokens": 25},
             compression_count=2,
         )
@@ -135,23 +177,31 @@ class HookTests(unittest.TestCase):
         status_hooks.post_api_request(
             session_id="s1",
             model="m1",
+            api_request_id="missing",
+            turn_id="t1",
             usage={"prompt_tokens": 10},
         )
         self.assertEqual(registry.get("s1")["compression_count"], 2)
 
-    def test_post_api_request_accumulates_canonical_total_and_keeps_latest_context(self):
+    def test_post_api_request_accumulates_matched_canonical_total_and_keeps_latest_context(self):
         registry = SessionRegistry(clock=FakeClock())
         status_hooks = hooks.StatusHooks(registry)
         status_hooks.on_session_start(session_id="s1", model="m1")
 
+        status_hooks.pre_api_request(session_id="s1", model="m1", api_request_id="r1", turn_id="t1")
         status_hooks.post_api_request(
             session_id="s1",
             model="m1",
+            api_request_id="r1",
+            turn_id="t1",
             usage={"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120},
         )
+        status_hooks.pre_api_request(session_id="s1", model="m1", api_request_id="r2", turn_id="t1")
         status_hooks.post_api_request(
             session_id="s1",
             model="m1",
+            api_request_id="r2",
+            turn_id="t1",
             usage={"prompt_tokens": 75, "completion_tokens": 10, "total_tokens": 85},
         )
 
@@ -159,29 +209,65 @@ class HookTests(unittest.TestCase):
         self.assertEqual(state["context_used"], 75)
         self.assertEqual(state["total_processed_tokens"], 205)
 
-    def test_post_api_request_ignores_invalid_total_tokens(self):
+    def test_post_api_request_invalid_total_tokens_mark_unknown(self):
         registry = SessionRegistry(clock=FakeClock())
         status_hooks = hooks.StatusHooks(registry)
         status_hooks.on_session_start(session_id="s1", model="m1")
 
+        status_hooks.pre_api_request(session_id="s1", model="m1", api_request_id="r1", turn_id="t1")
         status_hooks.post_api_request(
             session_id="s1",
             model="m1",
+            api_request_id="r1",
+            turn_id="t1",
             usage={"prompt_tokens": 10, "total_tokens": 25},
         )
-        for invalid in (None, -1, "12", 1.5, True, False, MAX_SAFE_WIRE_INTEGER + 1):
+        for index, invalid in enumerate((None, -1, "12", 1.5, True, False, MAX_SAFE_WIRE_INTEGER + 1), start=2):
+            status_hooks.on_session_start(session_id="s1", model="m1")
+            status_hooks.pre_api_request(session_id="s1", model="m1", api_request_id=f"r{index}", turn_id="t1")
             status_hooks.post_api_request(
                 session_id="s1",
                 model="m1",
+                api_request_id=f"r{index}",
+                turn_id="t1",
                 usage={"prompt_tokens": 10, "total_tokens": invalid},
             )
+            self.assertIsNone(registry.get("s1")["total_processed_tokens"])
+
+    def test_pre_api_request_missing_identity_marks_unknown_but_absent_session_is_noop(self):
+        registry = SessionRegistry(clock=FakeClock())
+        status_hooks = hooks.StatusHooks(registry)
+
+        status_hooks.pre_api_request(session_id="missing", model="m1", api_request_id=None, turn_id="t1")
+        self.assertIsNone(registry.get("missing"))
+
+        status_hooks.on_session_start(session_id="s1", model="m1")
+        status_hooks.pre_api_request(session_id="s1", model="m1", api_request_id="seed", turn_id="turn")
+        status_hooks.post_api_request(session_id="s1", model="m1", api_request_id="seed", turn_id="turn", usage={"total_tokens": 10})
+        status_hooks.pre_api_request(session_id="s1", model="m1", api_request_id=None, turn_id="turn")
+
+        self.assertIsNone(registry.get("s1")["total_processed_tokens"])
+
+    def test_post_api_request_unmatched_completion_does_not_update_context_or_compression(self):
+        registry = SessionRegistry(clock=FakeClock())
+        status_hooks = hooks.StatusHooks(registry)
+        status_hooks.on_session_start(session_id="s1", model="m1")
+        registry.update_context("s1", 10)
+        registry.update_compression_count("s1", 1)
+
         status_hooks.post_api_request(
             session_id="s1",
             model="m1",
-            usage={"prompt_tokens": 10, "total_tokens": 0},
+            api_request_id="missing",
+            turn_id="t1",
+            usage={"prompt_tokens": 99, "total_tokens": 99},
+            compression_count=4,
         )
 
-        self.assertEqual(registry.get("s1")["total_processed_tokens"], 25)
+        state = registry.get("s1")
+        self.assertEqual(state["context_used"], 10)
+        self.assertEqual(state["compression_count"], 1)
+        self.assertIsNone(state["total_processed_tokens"])
 
     def test_subagent_and_yolo_fields_are_real_event_derived(self):
         registry = SessionRegistry(clock=FakeClock())

@@ -44,7 +44,8 @@ export function formatContext(used: number | null, max: number | null): string {
     return `${formatCompactNumber(used)}/${formatCompactNumber(max)}`;
 }
 
-export function formatExactCount(value: number): string {
+export function formatExactCount(value: number | null): string {
+    if (value == null || !Number.isFinite(value)) return "unknown";
     return Math.max(0, Math.round(value)).toLocaleString("en-US");
 }
 
@@ -161,7 +162,10 @@ export function buildStatusFields(snapshot: HermesSnapshot, now = Date.now()): S
 
     fields.push(field("model", status.model || "Hermes", `Model: ${status.model || "unknown"}`, "model"));
     fields.push(field("context", context, `Context window: ${formatCompactNumber(status.context_used)} used of ${formatCompactNumber(status.context_max)} (${percentText})`, "context"));
-    fields.push(field("total-processed", `Total ${formatCompactNumber(status.total_processed_tokens)}`, `Total processed: ${formatExactCount(status.total_processed_tokens)} tokens`, "hide-narrow"));
+    const totalTooltip = status.total_processed_tokens == null
+        ? "Total processed: unknown"
+        : `Total processed: ${formatExactCount(status.total_processed_tokens)} tokens`;
+    fields.push(field("total-processed", `Total ${formatCompactNumber(status.total_processed_tokens)}`, totalTooltip, "hide-narrow"));
     fields.push(field("gauge", `${formatContextGauge(percent)} ${percentText}`, `Context gauge: ${percentText} used`, "gauge"));
 
     if (compressionCount != null && compressionCount > 0) {

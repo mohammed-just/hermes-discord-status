@@ -101,7 +101,7 @@ class RoutingTests(unittest.TestCase):
             else:
                 sys.modules["hermes_state"] = original
 
-    def test_parent_channel_resolves_newest_child_thread_session(self):
+    def test_parent_channel_does_not_resolve_child_thread_session(self):
         with TemporaryDirectory() as td:
             home = Path(td)
             sessions = home / "sessions"
@@ -134,7 +134,34 @@ class RoutingTests(unittest.TestCase):
                 encoding="utf-8",
             )
             resolver = DiscordRouteResolver(hermes_home=home)
-            self.assertEqual(resolver.resolve("12345678901234567"), "new-child-session")
+            self.assertEqual(resolver.resolve("12345678901234567"), "old-parent-session")
+            self.assertEqual(resolver.resolve("22345678901234567"), "new-child-session")
+
+    def test_thread_route_never_matches_parent_chat_id_when_parent_has_no_entry(self):
+        with TemporaryDirectory() as td:
+            home = Path(td)
+            sessions = home / "sessions"
+            sessions.mkdir()
+            (sessions / "sessions.json").write_text(
+                json.dumps(
+                    {
+                        "child": {
+                            "session_id": "child-session",
+                            "platform": "discord",
+                            "origin": {
+                                "platform": "discord",
+                                "chat_id": "12345678901234567",
+                                "thread_id": "22345678901234567",
+                            },
+                            "updated_at": "2999-01-01T00:00:00Z",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            resolver = DiscordRouteResolver(hermes_home=home)
+            self.assertIsNone(resolver.resolve("12345678901234567"))
+            self.assertEqual(resolver.resolve("22345678901234567"), "child-session")
 
     def test_prefers_newest_exact_db_route_before_json_fallback(self):
         class FakeDB:

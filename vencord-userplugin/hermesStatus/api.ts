@@ -46,8 +46,8 @@ export function validateHermesStatus(value: unknown): HermesStatus | null {
     if (value.context_used != null && value.context_used < 0) return null;
     if (value.context_max != null && value.context_max <= 0) return null;
     if (value.context_percent != null && value.context_percent < 0) return null;
-    const totalProcessedTokens = "total_processed_tokens" in value ? value.total_processed_tokens : 0;
-    if (!isNonNegativeSafeInteger(totalProcessedTokens)) return null;
+    const totalProcessedTokens = "total_processed_tokens" in value ? value.total_processed_tokens : null;
+    if (totalProcessedTokens !== null && !isNonNegativeSafeInteger(totalProcessedTokens)) return null;
     if (!isSafeEpoch(typeof value.session_started_at === "number" ? value.session_started_at : null)) return null;
     if (!isSafeEpoch(isNullableNumber(value.turn_started_at) ? value.turn_started_at : null)) return null;
     if (typeof value.busy !== "boolean") return null;

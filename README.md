@@ -20,7 +20,7 @@ It combines two components:
 
 It does **not** add a footer to Discord messages. It does **not** send status data to any remote service.
 
-`Total processed` is cumulative for the current Hermes session/thread. It adds the canonical `usage.total_tokens` from each successful model API request, which covers the provider-processed prompt/input plus output for that request. It is distinct from current context, which remains the latest request's context-window usage. Cached input, reasoning, or other token detail buckets are not added separately, because the canonical total already accounts for the request without double-counting. Child subagent session usage is not included in the parent conversation counter.
+`Total processed` is memory-only for the current live Hermes session/thread. It starts as unknown and displays as `Total --` after a gateway restart or historic route fallback, because the bridge intentionally keeps no ledger, database, file, lock, tombstone, replay state, or other persistent accounting. After a new authoritative Hermes session starts, the total becomes numeric only when the bridge accepts a matching `pre_api_request` / `post_api_request` pair for the same `api_request_id` and `turn_id`. It adds the canonical `usage.total_tokens` from each accepted successful model API request, which covers the provider-processed prompt/input plus output for that request. It is distinct from current context, which remains the latest request's context-window usage. Cached input, reasoning, or other token detail buckets are not added separately, because the canonical total already accounts for the request without double-counting. Child subagent session usage is not included in the parent conversation counter. If request identity is missing, a completion arrives without a matching current pre-request, the canonical total is missing/invalid, a matching request errors, or the safe wire integer range would overflow, the live lifecycle's total returns to unknown rather than showing a misleading undercount.
 
 ## Privacy model
 
@@ -150,7 +150,7 @@ The status endpoint is:
 GET /v1/status/discord/<channel-or-thread-id>
 ```
 
-The bridge is a standalone plugin and does not receive a live Hermes agent object. Model, context usage, total processed tokens, tool activity, session/turn timing, API errors, subagent activity, YOLO state, and optional compression count are derived only from public Hermes hook payloads and safe session state. If Hermes does not emit a compression count in hook payloads, the bridge reports `0` rather than guessing.
+The bridge is a standalone plugin and does not receive a live Hermes agent object. Model, context usage, total processed tokens, tool activity, session/turn timing, API errors, subagent activity, YOLO state, and optional compression count are derived only from public Hermes hook payloads and safe in-memory session state. If Hermes does not emit a compression count in hook payloads, the bridge reports `0` rather than guessing. A gateway restart discards live total accounting, so Discord shows `Total --` until a new valid session and accepted API request establish a fresh in-memory total.
 
 To confirm the bridge is listening only on loopback after enabling the plugin:
 

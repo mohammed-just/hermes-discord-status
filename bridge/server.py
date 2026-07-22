@@ -116,7 +116,7 @@ class _Handler(BaseHTTPRequestHandler):
                     "context_used": None,
                     "context_max": None,
                     "context_percent": None,
-                    "total_processed_tokens": 0,
+                    "total_processed_tokens": None,
                     "session_started_at": now,
                     "turn_started_at": None,
                     "busy": False,

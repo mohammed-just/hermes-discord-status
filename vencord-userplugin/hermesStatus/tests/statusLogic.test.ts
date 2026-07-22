@@ -105,9 +105,18 @@ const payloadWithoutTotal: Partial<HermesStatus> = {
 };
 delete payloadWithoutTotal.total_processed_tokens;
 const parsedWithoutTotal = validateHermesStatus(payloadWithoutTotal);
-assertEqual(parsedWithoutTotal?.total_processed_tokens, 0);
+assertEqual(parsedWithoutTotal?.total_processed_tokens, null);
 
-for (const invalidTotal of [-1, 1.5, "748126", null, Number.MAX_SAFE_INTEGER + 1]) {
+const parsedUnknownTotal = validateHermesStatus({
+    ...status,
+    session_started_at: 1_700_000_000,
+    turn_started_at: null,
+    updated_at: 1_700_000_001,
+    total_processed_tokens: null
+});
+assertEqual(parsedUnknownTotal?.total_processed_tokens, null);
+
+for (const invalidTotal of [-1, 1.5, "748126", Number.MAX_SAFE_INTEGER + 1]) {
     assertEqual(validateHermesStatus({
         ...status,
         session_started_at: 1_700_000_000,
@@ -178,6 +187,26 @@ assertEqual(activeFields.find(field => field.id === "total-processed")?.value, "
 assertEqual(activeFields.find(field => field.id === "total-processed")?.tooltip, "Total processed: 748,126 tokens");
 assertEqual(activeFields.find(field => field.id === "total-processed")?.ariaLabel, "Total processed: 748,126 tokens");
 assertEqual(activeFields.map(field => field.id).slice(0, 4).join(","), "model,context,total-processed,gauge");
+
+const unknownTotalFields = buildStatusFields({
+    channelId: "c1",
+    status: {
+        ...status,
+        total_processed_tokens: null,
+        busy: false,
+        active_tool: null,
+        tool_calls: 0,
+        active_tool_calls: 0,
+        compression_count: 0,
+        active_subagents: 0,
+        yolo: false
+    },
+    connectionState: "connected",
+    error: null,
+    receivedAt: 180_000
+}, 180_000);
+assertEqual(unknownTotalFields.find(field => field.id === "total-processed")?.value, "Total --");
+assertEqual(unknownTotalFields.find(field => field.id === "total-processed")?.tooltip, "Total processed: unknown");
 assertEqual(activeFields.some(field => field.id === "gauge" && field.tooltip === "Context gauge: 50% used"), true);
 assertEqual(activeFields.some(field => field.id === "session-elapsed" && field.tooltip === "Session elapsed: 3m"), true);
 assertEqual(activeFields.some(field => field.id === "freshness" && field.tooltip === "State last changed: 2m ago"), true);

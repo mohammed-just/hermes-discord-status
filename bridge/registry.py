@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import threading
 import time
+from collections import OrderedDict
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -30,7 +31,7 @@ class SessionState:
     context_used: int | None
     context_max: int | None
     context_percent: float | None
-    total_processed_tokens: int
+    total_processed_tokens: int | None
     session_started_at: float
     turn_started_at: float | None
     busy: bool
@@ -45,13 +46,26 @@ class SessionState:
 
 
 class SessionRegistry:
-    def __init__(self, *, stale_after_seconds: float = 6 * 60 * 60, max_sessions: int = 512, clock=time.time):
+    def __init__(
+        self,
+        *,
+        stale_after_seconds: float = 6 * 60 * 60,
+        max_sessions: int = 512,
+        max_pending_api_requests: int = 1024,
+        max_completed_api_requests: int = 1024,
+        clock=time.time,
+    ):
         self._states: dict[str, SessionState] = {}
         self._active_tools: dict[str, dict[str, str]] = {}
+        self._pending_api_requests: dict[str, dict[tuple[str, str], None]] = {}
+        self._completed_api_requests: dict[str, OrderedDict[tuple[str, str], None]] = {}
+        self._unknown_total_lifecycles: set[str] = set()
         self._anon_tool_seq = 0
         self._lock = threading.RLock()
         self._stale_after = stale_after_seconds
         self._max_sessions = max(1, int(max_sessions))
+        self._max_pending_api_requests = max(1, int(max_pending_api_requests))
+        self._max_completed_api_requests = max(1, int(max_completed_api_requests))
         self._clock = clock
 
     def _trim_locked(self, protected_session_id: str | None = None) -> None:
@@ -67,6 +81,9 @@ class SessionRegistry:
         for session_id, _state in oldest:
             self._states.pop(session_id, None)
             self._active_tools.pop(session_id, None)
+            self._pending_api_requests.pop(session_id, None)
+            self._completed_api_requests.pop(session_id, None)
+            self._unknown_total_lifecycles.discard(session_id)
 
     def _upsert_session_locked(
         self,
@@ -87,7 +104,7 @@ class SessionRegistry:
             context_used=existing.context_used if existing else None,
             context_max=next_context_max,
             context_percent=_percent(existing.context_used, next_context_max) if existing else None,
-            total_processed_tokens=existing.total_processed_tokens if existing else 0,
+            total_processed_tokens=existing.total_processed_tokens if existing else None,
             session_started_at=existing.session_started_at if existing else unix_now(now),
             turn_started_at=existing.turn_started_at if existing else None,
             busy=existing.busy if existing else False,
@@ -108,14 +125,46 @@ class SessionRegistry:
             return
         now = self._clock()
         with self._lock:
-            self._upsert_session_locked(session_id, model, now=now, context_max=context_max, yolo=yolo)
+            self._pending_api_requests.pop(session_id, None)
+            self._completed_api_requests.pop(session_id, None)
+            self._unknown_total_lifecycles.discard(session_id)
+            self._active_tools.pop(session_id, None)
+            self._states[session_id] = SessionState(
+                schema_version=1,
+                session_id=session_id,
+                model=model or "",
+                context_used=None,
+                context_max=context_max,
+                context_percent=None,
+                total_processed_tokens=None,
+                session_started_at=unix_now(now),
+                turn_started_at=None,
+                busy=False,
+                active_tool=None,
+                tool_calls=0,
+                active_tool_calls=0,
+                compression_count=0,
+                active_subagents=0,
+                yolo=bool(yolo) if yolo is not None else False,
+                updated_at=unix_now(now),
+                error=None,
+            )
+            self._trim_locked(protected_session_id=session_id)
+
+    def has_session(self, session_id: str) -> bool:
+        if not session_id:
+            return False
+        with self._lock:
+            return session_id in self._states
 
     def start_turn(self, session_id: str, model: str, *, context_max: int | None = None, yolo: bool | None = None) -> None:
         if not session_id:
             return
         now = self._clock()
         with self._lock:
-            state = self._upsert_session_locked(session_id, model, now=now, context_max=context_max, yolo=yolo)
+            state = self._states.get(session_id)
+            if state is None:
+                return
             state.model = model or state.model
             if yolo is not None:
                 state.yolo = bool(yolo)
@@ -134,7 +183,7 @@ class SessionRegistry:
         with self._lock:
             state = self._states.get(session_id)
             if state is None:
-                state = self._upsert_session_locked(session_id, "", now=self._clock(), context_max=context_max)
+                return
             if used is not None and used >= 0:
                 state.context_used = int(used)
             if context_max is not None:
@@ -142,17 +191,105 @@ class SessionRegistry:
             state.context_percent = _percent(state.context_used, state.context_max)
             state.updated_at = unix_now(self._clock())
 
-    def add_total_processed_tokens(self, session_id: str, delta: int) -> None:
-        if not session_id or not isinstance(delta, int) or isinstance(delta, bool) or delta < 0 or delta > MAX_SAFE_WIRE_INTEGER:
+    def _request_key(self, api_request_id: Any, turn_id: Any) -> tuple[str, str] | None:
+        if not isinstance(api_request_id, str) or not isinstance(turn_id, str):
+            return None
+        if not api_request_id.strip() or not turn_id.strip():
+            return None
+        return (api_request_id, turn_id)
+
+    def track_api_request_start(self, session_id: str, api_request_id: Any, turn_id: Any) -> bool:
+        if not session_id:
+            return False
+        with self._lock:
+            state = self._states.get(session_id)
+            if state is None:
+                return False
+            key = self._request_key(api_request_id, turn_id)
+            if key is None:
+                self._mark_total_unknown_locked(session_id, state)
+                state.updated_at = unix_now(self._clock())
+                return False
+            pending = self._pending_api_requests.setdefault(session_id, {})
+            if key in pending:
+                return True
+            if key in self._completed_api_requests.get(session_id, {}):
+                return False
+            if len(pending) >= self._max_pending_api_requests:
+                self._mark_total_unknown_locked(session_id, state)
+                state.updated_at = unix_now(self._clock())
+                return False
+            pending[key] = None
+            return True
+
+    def complete_api_request(self, session_id: str, api_request_id: Any, turn_id: Any, total_tokens: int | None) -> str:
+        if not session_id:
+            return "unmatched"
+        with self._lock:
+            state = self._states.get(session_id)
+            if state is None:
+                return "missing-session"
+            key = self._request_key(api_request_id, turn_id)
+            if key is None:
+                self._mark_total_unknown_locked(session_id, state)
+                state.updated_at = unix_now(self._clock())
+                return "unmatched"
+            completed = self._completed_api_requests.setdefault(session_id, OrderedDict())
+            if key in completed:
+                completed.move_to_end(key)
+                return "duplicate"
+            pending = self._pending_api_requests.get(session_id, {})
+            if key not in pending:
+                self._mark_total_unknown_locked(session_id, state)
+                state.updated_at = unix_now(self._clock())
+                return "unmatched"
+            pending.pop(key, None)
+            if not pending:
+                self._pending_api_requests.pop(session_id, None)
+            if total_tokens is None:
+                self._mark_total_unknown_locked(session_id, state)
+            elif session_id not in self._unknown_total_lifecycles:
+                if state.total_processed_tokens is None:
+                    state.total_processed_tokens = 0
+                if state.total_processed_tokens > MAX_SAFE_WIRE_INTEGER - total_tokens:
+                    self._mark_total_unknown_locked(session_id, state)
+                else:
+                    state.total_processed_tokens += total_tokens
+            state.updated_at = unix_now(self._clock())
+            if key not in completed:
+                if len(completed) >= self._max_completed_api_requests:
+                    self._mark_total_unknown_locked(session_id, state)
+                else:
+                    completed[key] = None
+                    completed.move_to_end(key)
+            return "accepted"
+
+    def mark_api_request_error(self, session_id: str, api_request_id: Any, turn_id: Any) -> None:
+        if not session_id:
             return
         with self._lock:
             state = self._states.get(session_id)
             if state is None:
-                state = self._upsert_session_locked(session_id, "", now=self._clock())
-            if state.total_processed_tokens > MAX_SAFE_WIRE_INTEGER - delta:
                 return
-            state.total_processed_tokens += delta
+            key = self._request_key(api_request_id, turn_id)
+            if key is None:
+                self._mark_total_unknown_locked(session_id, state)
+                state.updated_at = unix_now(self._clock())
+                return
+            pending = self._pending_api_requests.get(session_id, {})
+            if key not in pending:
+                self._mark_total_unknown_locked(session_id, state)
+                state.updated_at = unix_now(self._clock())
+                return
+            pending.pop(key, None)
+            if not pending:
+                self._pending_api_requests.pop(session_id, None)
+            self._mark_total_unknown_locked(session_id, state)
             state.updated_at = unix_now(self._clock())
+
+    def _mark_total_unknown_locked(self, session_id: str, state: SessionState) -> None:
+        self._unknown_total_lifecycles.add(session_id)
+        state.total_processed_tokens = None
 
     def _tool_key(self, tool_call_id: str | None) -> str:
         tool_call_id = str(tool_call_id or "").strip()
@@ -172,7 +309,7 @@ class SessionRegistry:
         with self._lock:
             state = self._states.get(session_id)
             if state is None:
-                state = self._upsert_session_locked(session_id, "", now=self._clock())
+                return
             tool_name = str(tool_name or "") or "tool"
             self._active_tools.setdefault(session_id, {})[self._tool_key(tool_call_id)] = tool_name
             state.busy = True
@@ -223,7 +360,7 @@ class SessionRegistry:
         with self._lock:
             state = self._states.get(session_id)
             if state is None:
-                state = self._upsert_session_locked(session_id, "", now=self._clock())
+                return
             if count is not None and count >= 0:
                 state.compression_count = int(count)
             elif increment:
@@ -236,7 +373,7 @@ class SessionRegistry:
         with self._lock:
             state = self._states.get(session_id)
             if state is None:
-                state = self._upsert_session_locked(session_id, "", now=self._clock())
+                return
             state.active_subagents = max(0, state.active_subagents + int(delta))
             state.updated_at = unix_now(self._clock())
 
@@ -249,7 +386,7 @@ class SessionRegistry:
         with self._lock:
             state = self._states.get(session_id)
             if state is None:
-                state = self._upsert_session_locked(session_id, "", now=self._clock())
+                return
             state.yolo = bool(active)
             state.updated_at = unix_now(self._clock())
 
@@ -268,9 +405,15 @@ class SessionRegistry:
             if session_id:
                 self._states.pop(session_id, None)
                 self._active_tools.pop(session_id, None)
+                self._pending_api_requests.pop(session_id, None)
+                self._completed_api_requests.pop(session_id, None)
+                self._unknown_total_lifecycles.discard(session_id)
             else:
                 self._states.clear()
                 self._active_tools.clear()
+                self._pending_api_requests.clear()
+                self._completed_api_requests.clear()
+                self._unknown_total_lifecycles.clear()
 
     def get(self, session_id: str) -> dict[str, Any] | None:
         with self._lock:
@@ -286,5 +429,8 @@ class SessionRegistry:
                 if updated < cutoff:
                     self._states.pop(sid, None)
                     self._active_tools.pop(sid, None)
+                    self._pending_api_requests.pop(sid, None)
+                    self._completed_api_requests.pop(sid, None)
+                    self._unknown_total_lifecycles.discard(sid)
                     removed += 1
         return removed
