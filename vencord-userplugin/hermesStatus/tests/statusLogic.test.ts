@@ -214,3 +214,13 @@ assertEqual(activeFields.some(field => field.id === "gauge" && field.tooltip ===
 assertEqual(activeFields.some(field => field.id === "session-elapsed" && field.tooltip === "Session elapsed: 3m"), true);
 assertEqual(activeFields.some(field => field.id === "freshness" && field.tooltip === "State last changed: 2m ago"), true);
 assertEqual(activeFields.some(field => field.id === "connection" && field.tooltip === "Hermes bridge connected"), true);
+
+const unavailableFields = buildStatusFields({
+    channelId: "c1",
+    status: null,
+    connectionState: "connecting",
+    error: null,
+    receivedAt: null
+}, 180_000);
+assertEqual(unavailableFields.find(field => field.id === "gauge")?.value, "--");
+assertEqual(unavailableFields.find(field => field.id === "connection")?.value, "●");

@@ -140,7 +140,7 @@ export function buildStatusFields(snapshot: HermesSnapshot, now = Date.now()): S
     if (!status) {
         fields.push(field("model", "Hermes", "Model: unknown", "model"));
         fields.push(field("context", "--/--", "Context window: unknown", "context"));
-        fields.push(field("gauge", `${formatContextGauge(null)} --`, "Context gauge: unknown", "gauge"));
+        fields.push(field("gauge", "--", "Context gauge: unknown", "gauge"));
         fields.push(field("session-elapsed", "--", "Session elapsed: unknown", "session"));
         fields.push(field("freshness", formatFreshness(null, snapshot.connectionState, snapshot.receivedAt, now), "State last changed: unknown", "freshness"));
         fields.push(field("connection", "●", snapshot.error ?? `Hermes bridge ${connection}`, "state"));
