@@ -143,7 +143,7 @@ export function buildStatusFields(snapshot: HermesSnapshot, now = Date.now()): S
         fields.push(field("gauge", `${formatContextGauge(null)} --`, "Context gauge: unknown", "gauge"));
         fields.push(field("session-elapsed", "--", "Session elapsed: unknown", "session"));
         fields.push(field("freshness", formatFreshness(null, snapshot.connectionState, snapshot.receivedAt, now), "State last changed: unknown", "freshness"));
-        fields.push(field("connection", connection, snapshot.error ?? `Hermes bridge ${connection}`, "state"));
+        fields.push(field("connection", "●", snapshot.error ?? `Hermes bridge ${connection}`, "state"));
         return fields;
     }
 
@@ -165,8 +165,8 @@ export function buildStatusFields(snapshot: HermesSnapshot, now = Date.now()): S
     const totalTooltip = status.total_processed_tokens == null
         ? "Total processed: unknown"
         : `Total processed: ${formatExactCount(status.total_processed_tokens)} tokens`;
-    fields.push(field("total-processed", `Total ${formatCompactNumber(status.total_processed_tokens)}`, totalTooltip, "hide-narrow"));
-    fields.push(field("gauge", `${formatContextGauge(percent)} ${percentText}`, `Context gauge: ${percentText} used`, "gauge"));
+    fields.push(field("total-processed", `Σ ${formatCompactNumber(status.total_processed_tokens)}`, totalTooltip, "hide-narrow"));
+    fields.push(field("gauge", percentText, `Context gauge: ${percentText} used`, "gauge"));
 
     if (compressionCount != null && compressionCount > 0) {
         fields.push(field("compression", `🗜️ ${compressionCount}`, `Compression count: ${compressionCount}`, "hide-compact"));
@@ -196,6 +196,6 @@ export function buildStatusFields(snapshot: HermesSnapshot, now = Date.now()): S
         fields.push(field("tool-count", `${toolCalls} calls`, `Tool call count: ${toolCalls}`, "hide-narrow"));
     }
 
-    fields.push(field("connection", connection, snapshot.error ?? `Hermes bridge ${connection}`, "state"));
+    fields.push(field("connection", "●", snapshot.error ?? `Hermes bridge ${connection}`, "state"));
     return fields;
 }

@@ -183,7 +183,10 @@ assertEqual(statusFieldClassName(activeFields.find(field => field.id === "active
 assertEqual(activeFields.some(field => field.id === "active-tool" && field.tooltip === "Active tool: shell"), true);
 assertEqual(activeFields.some(field => field.id === "active-tool-count" && field.tooltip === "Active tool calls: 2"), true);
 assertEqual(activeFields.some(field => field.id === "context" && field.tooltip === "Context window: 1K used of 2K (50%)"), true);
-assertEqual(activeFields.find(field => field.id === "total-processed")?.value, "Total 748K");
+// Keep the visual bar terse: explanatory text belongs in each field's tooltip.
+assertEqual(activeFields.find(field => field.id === "total-processed")?.value, "Σ 748K");
+assertEqual(activeFields.find(field => field.id === "gauge")?.value, "50%");
+assertEqual(activeFields.find(field => field.id === "connection")?.value, "●");
 assertEqual(activeFields.find(field => field.id === "total-processed")?.tooltip, "Total processed: 748,126 tokens");
 assertEqual(activeFields.find(field => field.id === "total-processed")?.ariaLabel, "Total processed: 748,126 tokens");
 assertEqual(activeFields.map(field => field.id).slice(0, 4).join(","), "model,context,total-processed,gauge");
@@ -205,7 +208,7 @@ const unknownTotalFields = buildStatusFields({
     error: null,
     receivedAt: 180_000
 }, 180_000);
-assertEqual(unknownTotalFields.find(field => field.id === "total-processed")?.value, "Total --");
+assertEqual(unknownTotalFields.find(field => field.id === "total-processed")?.value, "Σ --");
 assertEqual(unknownTotalFields.find(field => field.id === "total-processed")?.tooltip, "Total processed: unknown");
 assertEqual(activeFields.some(field => field.id === "gauge" && field.tooltip === "Context gauge: 50% used"), true);
 assertEqual(activeFields.some(field => field.id === "session-elapsed" && field.tooltip === "Session elapsed: 3m"), true);

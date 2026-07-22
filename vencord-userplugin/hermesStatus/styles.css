@@ -7,16 +7,15 @@
 .vc-hermesStatus-bar {
     display: flex;
     align-items: center;
-    gap: 8px;
-    min-height: 26px;
-    margin: 0 16px 6px;
-    padding: 4px 8px;
+    min-height: 22px;
+    margin: 0 16px 4px;
+    padding: 2px 8px;
     overflow: hidden;
     color: var(--text-default);
-    background: var(--background-secondary);
-    border: 1px solid var(--background-modifier-accent);
-    border-radius: 6px;
-    font-size: 12px;
+    background: var(--background-secondary-alt);
+    border-radius: 5px;
+    box-shadow: inset 0 0 0 1px var(--background-modifier-accent);
+    font-size: 11px;
     line-height: 16px;
     pointer-events: auto;
 }
@@ -31,39 +30,48 @@
 
 .vc-hermesStatus-field {
     color: var(--text-muted);
+    font-weight: 500;
 }
 
 .vc-hermesStatus-fieldGroup {
     display: inline-flex;
     align-items: center;
     min-width: 0;
-    gap: 8px;
 }
 
 .vc-hermesStatus-fieldGroup-connection {
     margin-left: auto;
+    padding-left: 4px;
 }
 
 .vc-hermesStatus-separator {
     flex: 0 0 auto;
+    margin: 0 6px;
     color: var(--text-muted);
-    opacity: 0.65;
+    opacity: 0.35;
 }
 
 .vc-hermesStatus-model {
-    max-width: 160px;
+    max-width: 140px;
     color: var(--text-default);
     font-weight: 600;
 }
 
-.vc-hermesStatus-line {
-    flex: 1 1 auto;
-    color: var(--text-default);
+.vc-hermesStatus-context,
+.vc-hermesStatus-gauge,
+.vc-hermesStatus-total-processed,
+.vc-hermesStatus-session,
+.vc-hermesStatus-freshness {
     font-variant-numeric: tabular-nums;
 }
 
+.vc-hermesStatus-gauge {
+    color: var(--text-brand);
+    font-weight: 600;
+}
+
 .vc-hermesStatus-tool {
-    max-width: 140px;
+    max-width: 120px;
 }
 
 .vc-hermesStatus-yolo {
@@ -72,7 +80,7 @@
 }
 
 .vc-hermesStatus-state {
-    padding-left: 4px;
+    font-size: 10px;
     font-weight: 600;
 }
 
