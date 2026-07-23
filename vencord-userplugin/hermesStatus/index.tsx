@@ -13,6 +13,7 @@ import { Menu } from "@webpack/common";
 
 import { getEnabledChannelIds, setChannelEnabled } from "./api";
 import { HermesStatusBar } from "./components/HermesStatusBar";
+import { CURRENT_COMPOSER_REPLACEMENT } from "./composerPatch";
 import { settings } from "./settings";
 
 const authors = [{ name: "Mohammed", id: 179181221824299008n }];
@@ -60,7 +61,7 @@ export default definePlugin({
                     // the editor. Access the plugin defensively: this composer can
                     // render before Vencord's PluginManager initializes.
                     match: /\(0,\i\.jsx\)\(\i,\{textValue:\i,editorHeight:\i,channelId:(\i)\.id\}\),/,
-                    replace: "$&globalThis.Vencord?.Plugins?.plugins?.HermesStatus?.renderHermesStatusBar($1.id)??null,"
+                    replace: CURRENT_COMPOSER_REPLACEMENT
                 }
             ],
         }

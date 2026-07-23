@@ -5,6 +5,7 @@
  */
 
 import { isStatusStale, validateHermesStatus } from "../api";
+import { CURRENT_COMPOSER_REPLACEMENT } from "../composerPatch";
 import { buildStatusFields, statusFieldClassName, statusFieldGroupClassName } from "../format";
 import { DEFAULT_POLL_INTERVAL_MS, scheduleDeferredStatusStart, STATUS_STARTUP_DELAY_MS } from "../polling";
 import type { HermesStatus } from "../types";
@@ -16,6 +17,13 @@ function assertEqual<T>(actual: T, expected: T): void {
 }
 
 assertEqual(DEFAULT_POLL_INTERVAL_MS, 5000);
+
+// CharacterCounter patches the same composer. Keep our inserted expression
+// parenthesized so its `,\\i` anchor cannot consume the leading globalThis.
+assertEqual(CURRENT_COMPOSER_REPLACEMENT.startsWith("$&(globalThis."), true);
+const characterCounterAfterEditor = /(?<=,editorRef:[A-Za-z_$][\w$]*,.{0,200}textValue:[A-Za-z_$][\w$]*,editorHeight:[A-Za-z_$][\w$]*,channelId:[A-Za-z_$][\w$]*\.id\}\)),[A-Za-z_$][\w$]*/;
+const composerWithHermes = ",editorRef:editor,textValue:text,editorHeight:height,channelId:channel.id})),(globalThis.Vencord?.Plugins?.plugins?.HermesStatus?.renderHermesStatusBar(channel.id)??null),";
+assertEqual(characterCounterAfterEditor.test(composerWithHermes), false);
 
 let idleCallback: (() => void) | undefined;
 let idleTimeout: number | undefined;
