@@ -20,8 +20,8 @@ function browserScheduler(): DeferredStartScheduler {
         cancelIdleCallback?: (handle: number) => void;
     };
     return {
-        requestIdleCallback: scope.requestIdleCallback,
-        cancelIdleCallback: scope.cancelIdleCallback,
+        requestIdleCallback: scope.requestIdleCallback?.bind(scope),
+        cancelIdleCallback: scope.cancelIdleCallback?.bind(scope),
         setTimeout: (callback, delay) => globalThis.setTimeout(callback, delay) as unknown as number,
         clearTimeout: handle => globalThis.clearTimeout(handle)
     };

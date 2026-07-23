@@ -56,14 +56,13 @@ export default definePlugin({
             find: ".CREATE_FORUM_POST||",
             replacement: [
                 {
-                    match: /(?<=,editorRef:\i,.{0,200}textValue:\i,editorHeight:\i,channelId:(\i)\.id\}\)),\$self\.renderCharCounter\(\{editorRef:\i,text:\i\}\)/,
-                    replace: "$&,$self.renderHermesStatusBar($1.id)"
-                },
-                {
-                    match: /(?<=,editorRef:\i,.{0,200}textValue:\i,editorHeight:\i,channelId:(\i)\.id\}\)),\i/,
-                    replace: ",$self.renderHermesStatusBar($1.id)"
+                    // Discord's current composer renders this effect immediately after
+                    // the editor. Access the plugin defensively: this composer can
+                    // render before Vencord's PluginManager initializes.
+                    match: /\(0,\i\.jsx\)\(\i,\{textValue:\i,editorHeight:\i,channelId:(\i)\.id\}\),/,
+                    replace: "$&globalThis.Vencord?.Plugins?.plugins?.HermesStatus?.renderHermesStatusBar($1.id)??null,"
                 }
-            ]
+            ],
         }
     ],
 

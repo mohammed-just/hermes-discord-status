@@ -37,6 +37,37 @@ idleCallback?.();
 assertEqual(startupCalls, 1);
 cancelDeferredStart();
 
+// Browser APIs such as requestIdleCallback require the Window/global receiver.
+// The default scheduler must bind them rather than copying bare method references.
+const globalScheduler = globalThis as typeof globalThis & {
+    requestIdleCallback?: (this: typeof globalThis, callback: () => void, options: { timeout: number; }) => number;
+    cancelIdleCallback?: (this: typeof globalThis, handle: number) => void;
+};
+const originalRequestIdleCallback = globalScheduler.requestIdleCallback;
+const originalCancelIdleCallback = globalScheduler.cancelIdleCallback;
+let browserIdleCallback: (() => void) | undefined;
+let browserSchedulerCalls = 0;
+try {
+    globalScheduler.requestIdleCallback = function (callback, options) {
+        assertEqual(this, globalThis);
+        assertEqual(options.timeout, STATUS_STARTUP_DELAY_MS);
+        browserSchedulerCalls++;
+        browserIdleCallback = callback;
+        return 3;
+    };
+    globalScheduler.cancelIdleCallback = function (handle) {
+        assertEqual(this, globalThis);
+        assertEqual(handle, 3);
+    };
+    const cancelBrowserDeferredStart = scheduleDeferredStatusStart(() => browserSchedulerCalls++);
+    browserIdleCallback?.();
+    cancelBrowserDeferredStart();
+    assertEqual(browserSchedulerCalls, 2);
+} finally {
+    globalScheduler.requestIdleCallback = originalRequestIdleCallback;
+    globalScheduler.cancelIdleCallback = originalCancelIdleCallback;
+}
+
 let fallbackCallback: (() => void) | undefined;
 let fallbackDelay: number | undefined;
 let fallbackCalls = 0;
